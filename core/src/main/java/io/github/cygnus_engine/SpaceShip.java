@@ -2,6 +2,8 @@ package io.github.cygnus_engine;
 
 import com.badlogic.gdx.math.MathUtils;
 
+// note: unused class
+
 public class SpaceShip extends GameObject {
     public enum Behavior {
         ORBITING_PLANET,

@@ -14,7 +14,12 @@ import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.utils.ScreenUtils;
+import com.badlogic.gdx.utils.viewport.ExtendViewport;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+
+// todo: keybinds to open inventory screen.
+// add a UI to show current ship info (hp) or cargo or hail the closest ship/planet/station
+// the main menu screen should be turned into a static UI element, with buttons to open up the other screens.
 
 /** {@link com.badlogic.gdx.ApplicationListener} implementation shared by all platforms. */
 public class Main extends ApplicationAdapter {
@@ -48,6 +53,8 @@ public class Main extends ApplicationAdapter {
 
     @Override
     public void create() {
+        //stage = new Stage(new ExtendViewport(800, 600, gameWorld.getCamera()));
+
         stage = new Stage(new ScreenViewport());
         skin = new Skin(Gdx.files.internal("ui/uiskin.json"));
         

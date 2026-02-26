@@ -2,6 +2,14 @@ package io.github.cygnus_engine;
 
 import com.badlogic.gdx.math.MathUtils;
 
+// todo: needs warp out/in
+// ships need cargo and trading
+// ships should have limited cargo with random contents
+
+// I need to separate ship movement from the ship class, I need a movement class. I need a single ship class.
+
+// ships should have a smalltalk dialogue.
+
 public class RandomFlyingShip extends GameObject {
     private GameObject planet;
     private GameObject spaceStation;
@@ -65,9 +73,9 @@ public class RandomFlyingShip extends GameObject {
     private void adjustCourseIfNeeded() {
         float distToPlanet = getDistanceTo(planet);
         float distToStation = getDistanceTo(spaceStation);
-        float minDist = Math.min(distToPlanet, distToStation);
+        float closestObjectDistance = Math.min(distToPlanet, distToStation);
         
-        if (minDist > maxDistanceFromObjects) {
+        if (closestObjectDistance > maxDistanceFromObjects) {
             // Too far, turn towards nearest object
             GameObject nearest = (distToPlanet < distToStation) ? planet : spaceStation;
             float dx = nearest.getX() - getX();

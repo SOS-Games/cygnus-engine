@@ -2,6 +2,10 @@ package io.github.cygnus_engine;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.Sprite;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.utils.Array;
@@ -20,6 +24,10 @@ public class GameWorld {
     private float warpTimer;
     private float warpInterval;
     private GameObject debugIndicator;
+
+    private SpriteBatch spriteBatch; // For future use with textures and fonts
+    private Texture playerTexture; // Placeholder for player ship texture
+    private Sprite playerSprite; // Sprite for player ship (if using SpriteBatch)
     
     public GameWorld() {
         shapeRenderer = new ShapeRenderer();
@@ -33,7 +41,17 @@ public class GameWorld {
         randomShips = new Array<>();
         warpTimer = 0f;
         warpInterval = 3f; // Warp every 10 seconds on average
-        
+
+        spriteBatch = new SpriteBatch();
+        spriteBatch.setProjectionMatrix(camera.combined);
+        playerTexture = new Texture("images/fighter.png");
+
+        playerTexture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        playerSprite = new Sprite(playerTexture);
+        playerSprite.setSize(20f, 20f);
+        playerSprite.rotate90(false);
+        playerSprite.setOriginCenter();
+
         initialize();
     }
     
@@ -49,6 +67,7 @@ public class GameWorld {
         debugIndicator = new GameObject(GameObject.Type.DEBUG_INDICATOR, 0, 0, 10f, "Debug Indicator");
         gameObjects.add(debugIndicator);
 
+        /*
         // Create space ships starting at planet
         for (int i = 0; i < 0; i++) {
             float angle = i * 180f; // Spread them around
@@ -76,6 +95,7 @@ public class GameWorld {
             spaceShips.add(ship);
             gameObjects.add(ship);
         }
+        */
         
         // Create random flying ships
         for (int i = 0; i < 6; i++) {
@@ -107,6 +127,7 @@ public class GameWorld {
         }
         
         // Occasionally trigger warp out for random ships
+        // todo: warp should also work for RandomFlyingShip, not just SpaceShip
         warpTimer += deltaTime;
         if (warpTimer >= warpInterval) {
             //System.out.println("Warp out ...");
@@ -145,8 +166,18 @@ public class GameWorld {
                                       obj.getSize(), obj.getSize());
                     break;
                 case SPACE_SHIP:
-                    shapeRenderer.setColor(Color.GREEN);
-                    drawRotatedTriangle(obj.getX(), obj.getY(), obj.getSize(), obj.getRotation());
+                    
+                    //shapeRenderer.setColor(Color.GREEN);
+                    //drawRotatedTriangle(obj.getX(), obj.getY(), obj.getSize(), obj.getRotation());
+
+                    float halfSizeShip = obj.getSize() * 0.5f;
+                    spriteBatch.begin();
+                    playerSprite.setPosition(obj.getX() - halfSizeShip, obj.getY() - halfSizeShip);
+                    playerSprite.setRotation(obj.getRotation());
+                    playerSprite.draw(spriteBatch);
+                    spriteBatch.end();
+
+                    // the sprites do not respect viewport size!!!
                     break;
                 case DEBUG_INDICATOR:
                     shapeRenderer.setColor(Color.RED);
@@ -185,6 +216,9 @@ public class GameWorld {
         // I know the camera's position. I know the viewport size. I know the world size.
 
         camera.update();
+
+        // this ensures sprites do not stretch with the viewport, and instead maintain their size relative to the world coordinates
+        spriteBatch.setProjectionMatrix(camera.combined);
     }
 
     public OrthographicCamera getCamera() {

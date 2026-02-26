@@ -45,11 +45,12 @@ public class GameObject {
     }
     
     public boolean containsPoint(float pointX, float pointY) {
+        double distance;
         switch (type) {
             case PLANET:
                 float dx = x - pointX;
                 float dy = y - pointY;
-                double distance = Math.sqrt(dx * dx + dy * dy);
+                distance = Math.sqrt(dx * dx + dy * dy);
                 return distance < size;
                 /*
                 float dx = pointX - x;
@@ -67,7 +68,9 @@ public class GameObject {
                 // Using a simple bounding circle check for now (can be improved)
                 float distX = pointX - x;
                 float distY = pointY - y;
-                return (distX * distX + distY * distY) <= size * size;
+                distance = Math.sqrt(distX * distX + distY * distY);
+                return distance < size;
+                //return (distX * distX + distY * distY) <= size * size;
             default:
                 return false;
         }
