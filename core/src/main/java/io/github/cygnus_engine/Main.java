@@ -21,6 +21,12 @@ import com.badlogic.gdx.utils.viewport.ScreenViewport;
 // add a UI to show current ship info (hp) or cargo or hail the closest ship/planet/station
 // the main menu screen should be turned into a static UI element, with buttons to open up the other screens.
 
+// long-term:
+// add a minimap/radar
+// add a star-system UI to jump to another area, and include a procgen system map
+// add a dynamic faction system
+// have a FTL-like text screen which allows handling "events"
+
 /** {@link com.badlogic.gdx.ApplicationListener} implementation shared by all platforms. */
 public class Main extends ApplicationAdapter {
     // UI components
