@@ -20,7 +20,6 @@ public class GameWorld {
     private GameObject planet;
     private GameObject spaceStation;
     private Array<SpaceShip> spaceShips;
-    private Array<RandomFlyingShip> randomShips;
     private float warpTimer;
     private float warpInterval;
     private GameObject debugIndicator;
@@ -38,7 +37,6 @@ public class GameWorld {
         
         gameObjects = new Array<>();
         spaceShips = new Array<>();
-        randomShips = new Array<>();
         warpTimer = 0f;
         warpInterval = 3f; // Warp every 10 seconds on average
 
@@ -66,44 +64,14 @@ public class GameWorld {
 
         debugIndicator = new GameObject(GameObject.Type.DEBUG_INDICATOR, 0, 0, 10f, "Debug Indicator");
         gameObjects.add(debugIndicator);
-
-        /*
-        // Create space ships starting at planet
-        for (int i = 0; i < 0; i++) {
-            float angle = i * 180f; // Spread them around
-            float orbitRadius = 80f;
-            float startX = planet.getX() + orbitRadius * (float) Math.cos(Math.toRadians(angle));
-            float startY = planet.getY() + orbitRadius * (float) Math.sin(Math.toRadians(angle));
-            
-            SpaceShip ship = new SpaceShip(startX, startY, 20f, "Space Ship " + (i + 1), 
-                                          planet, spaceStation, ShipConfig.createDefault(), 
-                                          SpaceShip.Behavior.ORBITING_PLANET);
-            spaceShips.add(ship);
-            gameObjects.add(ship);
-        }
         
-        // Create space ships starting at station
-        for (int i = 0; i < 0; i++) {
-            float angle = i * 180f; // Spread them around
-            float orbitRadius = 80f;
-            float startX = spaceStation.getX() + orbitRadius * (float) Math.cos(Math.toRadians(angle));
-            float startY = spaceStation.getY() + orbitRadius * (float) Math.sin(Math.toRadians(angle));
-            
-            SpaceShip ship = new SpaceShip(startX, startY, 20f, "Station Ship " + (i + 1), 
-                                          planet, spaceStation, ShipConfig.createDefault(), 
-                                          SpaceShip.Behavior.ORBITING_STATION);
-            spaceShips.add(ship);
-            gameObjects.add(ship);
-        }
-        */
-        
-        // Create random flying ships
+        // Create space ships
         for (int i = 0; i < 6; i++) {
             float x = MathUtils.random(100f, WORLD_WIDTH - 100f);
             float y = MathUtils.random(100f, WORLD_HEIGHT - 100f);
-            RandomFlyingShip ship = new RandomFlyingShip(x, y, 18f, "Random Ship " + (i + 1), 
+            SpaceShip ship = new SpaceShip(x, y, 18f, "Random Ship " + (i + 1), 
                                                         planet, spaceStation);
-            randomShips.add(ship);
+            spaceShips.add(ship);
             gameObjects.add(ship);
         }
     }
@@ -114,29 +82,23 @@ public class GameWorld {
             ship.update(deltaTime);
         }
         
-        // Update random flying ships
-        for (RandomFlyingShip ship : randomShips) {
-            ship.update(deltaTime);
-        }
-        
         // Update other game objects
         for (GameObject obj : gameObjects) {
-            if (!(obj instanceof SpaceShip) && !(obj instanceof RandomFlyingShip)) {
+            if (!(obj instanceof SpaceShip) && !(obj instanceof SpaceShip)) {
                 obj.update(deltaTime);
             }
         }
         
-        // Occasionally trigger warp out for random ships
-        // todo: warp should also work for RandomFlyingShip, not just SpaceShip
+        // Occasionally trigger warp out for space ships
         warpTimer += deltaTime;
         if (warpTimer >= warpInterval) {
             //System.out.println("Warp out ...");
             warpTimer = 0f;
-            warpInterval = MathUtils.random(4f, 8f);
+            warpInterval = MathUtils.random(2f, 4f);
             
             // Randomly select a ship to warp out
             if (spaceShips.size > 0 && MathUtils.randomBoolean(1.0f)) {
-                //System.out.println("Warp out ... selecting ship");
+                System.out.println("Warp out ... selecting ship");
                 int index = MathUtils.random(spaceShips.size - 1);
                 spaceShips.get(index).triggerWarpOut();
             }
@@ -167,6 +129,7 @@ public class GameWorld {
                     break;
                 case SPACE_SHIP:
                     
+                    // uncomment to see triangle clickbox
                     //shapeRenderer.setColor(Color.GREEN);
                     //drawRotatedTriangle(obj.getX(), obj.getY(), obj.getSize(), obj.getRotation());
 
@@ -244,12 +207,6 @@ public class GameWorld {
     }
     
     public GameObject getObjectAt(float x, float y) {
-        // convert xy to world coords WORLD_WIDTH/WORLD_HEIGHT
-
-        // note: worldX changes as screen width changes (unstable)
-        // while worldY does not (stable)
-        
-        //System.out.println("worldX: " + worldX + " worldY: " + worldY);
         // Check objects in reverse order (top-most first)
         for (int i = gameObjects.size - 1; i >= 0; i--) {
             GameObject obj = gameObjects.get(i);
