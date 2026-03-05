@@ -22,6 +22,10 @@ import com.badlogic.gdx.utils.viewport.ScreenViewport;
 // the main menu screen should be turned into a static UI element, with buttons to open up the other screens.
 
 // long-term:
+
+// add a ship modding system, which allows importing a texture and/or existing JSON
+// defining the bounds of the ship, and drawing weapon/engine points and center-of-mass
+
 // add a minimap/radar
 // add a star-system UI to jump to another area, and include a procgen system map
 // add a dynamic faction system
@@ -34,10 +38,10 @@ public class Main extends ApplicationAdapter {
     private Skin skin;
     private Cargo cargo;
     private Window mainWindow;
-    private TradeScreen tradeScreen;
+    //private TradeScreen tradeScreen;
     private CargoMenuScreen cargoMenuScreen;
     private GameObjectInfoWindow objectInfoWindow;
-    private int money = 1000; // Starting money
+    private int[] moneyRef = {1000}; // Starting money
 
     // Game world
     private GameWorld gameWorld;
@@ -68,7 +72,7 @@ public class Main extends ApplicationAdapter {
         gameWorld = new GameWorld();
 
         // Initialize cargo
-        cargo = new Cargo();
+        cargo = new Cargo(false);
 
         // Create main menu window
         mainWindow = new Window("Main Menu", skin, "border");
@@ -76,19 +80,20 @@ public class Main extends ApplicationAdapter {
         mainWindow.add("Welcome to the Trading Game").row();
         
         // Trade button
+        /*
         TextButton tradeButton = new TextButton("Open Trade Screen", skin);
         tradeButton.pad(8f);
         tradeButton.addListener(new ChangeListener() {
             @Override
             public void changed(final ChangeEvent event, final Actor actor) {
                 if (tradeScreen == null) {
-                    tradeScreen = new TradeScreen(skin, cargo, money);
+                    tradeScreen = new TradeScreen(skin, cargo, moneyRef, null);
                     createAndCenterWindow(tradeScreen, stage);
                 } else {
                     // Update money in case it changed
-                    if (tradeScreen.getMoney() != money) {
+                    if (tradeScreen.getMoney() != moneyRef[0]) {
                         tradeScreen.remove();
-                        tradeScreen = new TradeScreen(skin, cargo, money);
+                        tradeScreen = new TradeScreen(skin, cargo, moneyRef, null);
                         createAndCenterWindow(tradeScreen, stage);
                     }
                     tradeScreen.setVisible(true);
@@ -96,6 +101,7 @@ public class Main extends ApplicationAdapter {
             }
         });
         mainWindow.add(tradeButton).row();
+        */
 
         // Cargo menu button
         TextButton cargoButton = new TextButton("View Cargo", skin);
@@ -190,7 +196,7 @@ public class Main extends ApplicationAdapter {
         if (objectInfoWindow != null) {
             objectInfoWindow.remove();
         }
-        objectInfoWindow = new GameObjectInfoWindow(skin, gameObject);
+        objectInfoWindow = new GameObjectInfoWindow(skin, gameObject, stage, cargo, moneyRef);
         createAndCenterWindow(objectInfoWindow, stage);
     }
 
@@ -211,9 +217,9 @@ public class Main extends ApplicationAdapter {
         stage.draw();
         
         // Update money from trade screen if it exists and is visible
-        if (tradeScreen != null && tradeScreen.isVisible()) {
-            money = tradeScreen.getMoney();
-        }
+        //if (tradeScreen != null && tradeScreen.isVisible()) {
+        //    moneyRef[0] = tradeScreen.getMoney();
+        //}
     }
 
     @Override

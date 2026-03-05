@@ -6,6 +6,10 @@ import com.badlogic.gdx.math.MathUtils;
 // ships need cargo and trading
 // ships should have limited cargo with random contents
 
+// how should trading work? Should commodity prices be varied?
+// you need to be able to profit, so the simplest case would be to slightly randomize the commodity prices
+// then each ship you trade with would have slightly different prices.
+
 // I need to separate ship movement from the ship class, I need a movement class. I need a single ship class.
 
 // ships should have a smalltalk dialogue.
@@ -48,6 +52,8 @@ public class SpaceShip extends GameObject {
     private float directionChangeInterval;
     private float maxDistanceFromObjects;
 
+    private Cargo cargo;
+
     private Behavior currentBehavior = Behavior.FLYING_AROUND_TARGET;
 
     private float warpSpeed; // max warp speed
@@ -73,6 +79,8 @@ public class SpaceShip extends GameObject {
         this.directionChangeTimer = 0f;
         this.directionChangeInterval = MathUtils.random(2f, 5f);
         this.maxDistanceFromObjects = 60f;
+
+        this.cargo = new Cargo(true);
         
         this.warpSpeed = 200f;
         this.warpTimer = 0f;
@@ -234,5 +242,9 @@ public class SpaceShip extends GameObject {
     
     public boolean isVisible() {
         return isVisible;
+    }
+    
+    public Cargo getCargo() {
+        return cargo;
     }
 }

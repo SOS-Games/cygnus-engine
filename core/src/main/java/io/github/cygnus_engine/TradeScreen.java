@@ -6,19 +6,23 @@ import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.Window;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
+import com.badlogic.gdx.utils.Align;
 
 public class TradeScreen extends Window {
-    private Cargo cargo;
+    private Cargo playerCargo;
+    private Cargo otherCargo;
     private Skin skin;
     private Table contentTable;
-    private int money; // Player's money
+    private int[] moneyRef; // Player's money reference
 
-    public TradeScreen(Skin skin, Cargo cargo, int initialMoney) {
+    public TradeScreen(Skin skin, Cargo playerCargo, int[] moneyRef, Cargo otherCargo) {
         super("Trade", skin, "border");
         this.skin = skin;
-        this.cargo = cargo;
-        this.money = initialMoney;
+        this.playerCargo = playerCargo;
+        this.otherCargo = otherCargo;
+        this.moneyRef = moneyRef;
 
         setModal(true);
         setMovable(true);
@@ -37,30 +41,50 @@ public class TradeScreen extends Window {
         contentTable.clear();
 
         // Money display
-        Label moneyLabel = new Label("Money: $" + money, skin);
-        contentTable.add(moneyLabel).colspan(9).padBottom(8f).row();
+        Label moneyLabel = new Label("Money: $" + moneyRef[0], skin);
+        contentTable.add(moneyLabel).colspan(11).padBottom(8f).row();
 
         // Header
         contentTable.add(new Label("Commodity", skin)).width(120f);
         contentTable.add(new Label("Price", skin)).width(80f);
+        //contentTable.add(new Label("Base", skin)).width(80f);
         contentTable.add(new Label("Owned", skin)).width(80f);
+        contentTable.add(new Label("Modifier", skin)).width(80f);
         contentTable.add(new Label("Buy", skin)).colspan(3).center();
+        contentTable.add(new Label("", skin)).width(80f);
+        contentTable.add(new Label("Owned", skin)).width(80f);
+        contentTable.add(new Label("Modifier", skin)).width(80f);
         contentTable.add(new Label("Sell", skin)).colspan(3).center();
         contentTable.row();
 
         // Commodity rows
         for (Commodity commodity : Commodity.values()) {
-            int price = commodity.getBasePrice();
-            int owned = cargo.getQuantity(commodity);
+            //int basePrice = commodity.getBasePrice();
+            double modifier = otherCargo.getModifier(commodity);
+            int modifiedPrice = otherCargo.getModifiedPrice(commodity);
+            Double owned = playerCargo.getQuantity(commodity);
+            Double ownedByOther = otherCargo.getQuantity(commodity);
 
             // Commodity name
             contentTable.add(new Label(commodity.getName(), skin)).width(120f);
 
-            // Price
-            contentTable.add(new Label("$" + price, skin)).width(80f);
+            // Modified price
+            contentTable.add(new Label("$" + modifiedPrice, skin)).width(80f);
 
-            // Owned
-            contentTable.add(new Label(String.valueOf(owned), skin)).width(80f);
+            // Base price
+            //contentTable.add(new Label("$" + basePrice, skin)).width(80f);
+
+            // Other ship Owned
+            contentTable.add(new Label(String.valueOf(ownedByOther), skin)).width(80f);
+
+            // Modifier (colored)
+            Label modLabel = new Label(String.format("%+.0f%%", modifier * 100), skin);
+            if (modifier > 0) {
+                modLabel.setColor(Color.RED);
+            } else if (modifier < 0) {
+                modLabel.setColor(Color.GREEN);
+            }
+            contentTable.add(modLabel).width(80f).right();
 
             // Buy buttons
             for (int amount : new int[]{1, 10, 100}) {
@@ -70,10 +94,21 @@ public class TradeScreen extends Window {
                 buyButton.addListener(new ChangeListener() {
                     @Override
                     public void changed(ChangeEvent event, Actor actor) {
-                        int cost = buyCommodity.getBasePrice() * buyAmount;
-                        if (money >= cost && cargo.getFreeSpace() >= buyAmount) {
-                            if (cargo.addCommodity(buyCommodity, buyAmount)) {
-                                money -= cost;
+                        int unitCost = otherCargo.getModifiedPrice(buyCommodity);
+                        int cost = unitCost * buyAmount;
+                        if (otherCargo != null) {
+                            // Buy from otherCargo
+                            if (otherCargo.getQuantity(buyCommodity) >= buyAmount && playerCargo.getFreeSpace() >= buyAmount && moneyRef[0] >= cost) {
+                                otherCargo.removeCommodity(buyCommodity, Double.valueOf(buyAmount));
+                                playerCargo.addCommodity(buyCommodity, Double.valueOf(buyAmount));
+                                moneyRef[0] -= cost;
+                                updateContent();
+                            }
+                        } else {
+                            // Buy to playerCargo
+                            if (moneyRef[0] >= cost && playerCargo.getFreeSpace() >= buyAmount) {
+                                playerCargo.addCommodity(buyCommodity, Double.valueOf(buyAmount));
+                                moneyRef[0] -= cost;
                                 updateContent();
                             }
                         }
@@ -81,6 +116,20 @@ public class TradeScreen extends Window {
                 });
                 contentTable.add(buyButton).width(50f);
             }
+
+            contentTable.add(new Label("", skin)).width(80f);
+            
+            // Owned
+            contentTable.add(new Label(String.valueOf(owned), skin)).width(80f);
+
+            // Modifier (colored)
+            Label modLabelSell = new Label(String.format("%+.0f%%", modifier * 100), skin);
+            if (modifier > 0) {
+                modLabelSell.setColor(Color.GREEN);
+            } else if (modifier < 0) {
+                modLabelSell.setColor(Color.RED);
+            }
+            contentTable.add(modLabelSell).width(80f).right();
 
             // Sell buttons
             for (int amount : new int[]{1, 10, 100}) {
@@ -90,9 +139,20 @@ public class TradeScreen extends Window {
                 sellButton.addListener(new ChangeListener() {
                     @Override
                     public void changed(ChangeEvent event, Actor actor) {
-                        if (cargo.getQuantity(sellCommodity) >= sellAmount) {
-                            if (cargo.removeCommodity(sellCommodity, sellAmount)) {
-                                money += sellCommodity.getBasePrice() * sellAmount;
+                        int unitPrice = otherCargo.getModifiedPrice(sellCommodity);
+                        if (otherCargo != null) {
+                            // Sell to otherCargo
+                            if (playerCargo.getQuantity(sellCommodity) >= sellAmount && otherCargo.getFreeSpace() >= sellAmount) {
+                                playerCargo.removeCommodity(sellCommodity, Double.valueOf(sellAmount));
+                                otherCargo.addCommodity(sellCommodity, Double.valueOf(sellAmount));
+                                moneyRef[0] += unitPrice * sellAmount;
+                                updateContent();
+                            }
+                        } else {
+                            // Sell from playerCargo
+                            if (playerCargo.getQuantity(sellCommodity) >= sellAmount) {
+                                playerCargo.removeCommodity(sellCommodity, Double.valueOf(sellAmount));
+                                moneyRef[0] += unitPrice * sellAmount;
                                 updateContent();
                             }
                         }
@@ -105,8 +165,8 @@ public class TradeScreen extends Window {
         }
 
         // Cargo space info
-        Label cargoLabel = new Label("Cargo: " + cargo.getUsedSpace() + "/" + cargo.getMaxSpace(), skin);
-        contentTable.add(cargoLabel).colspan(9).padTop(8f).row();
+        Label cargoLabel = new Label("Cargo: " + playerCargo.getUsedSpace() + "/" + playerCargo.getMaxSpace(), skin);
+        contentTable.add(cargoLabel).colspan(11).padTop(8f).row();
 
         // Close button
         TextButton closeButton = new TextButton("Close", skin);
@@ -118,10 +178,10 @@ public class TradeScreen extends Window {
             }
         });
         contentTable.row();
-        contentTable.add(closeButton).colspan(9).padTop(8f);
+        contentTable.add(closeButton).colspan(11).padTop(8f);
     }
 
     public int getMoney() {
-        return money;
+        return moneyRef[0];
     }
 }

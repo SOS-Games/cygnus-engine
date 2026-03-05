@@ -46,12 +46,12 @@ public class CargoMenuScreen extends Window {
         contentTable.row();
 
         // Commodity rows
-        Map<Commodity, Integer> commodities = cargo.getAllCommodities();
+        Map<Commodity, Double> commodities = cargo.getAllCommodities();
         if (commodities.isEmpty()) {
             Label emptyLabel = new Label("Cargo is empty", skin);
             contentTable.add(emptyLabel).colspan(2).padTop(8f).row();
         } else {
-            for (Map.Entry<Commodity, Integer> entry : commodities.entrySet()) {
+            for (Map.Entry<Commodity, Double> entry : commodities.entrySet()) {
                 contentTable.add(new Label(entry.getKey().getName(), skin)).width(200f);
                 contentTable.add(new Label(String.valueOf(entry.getValue()), skin)).width(100f);
                 contentTable.row();
