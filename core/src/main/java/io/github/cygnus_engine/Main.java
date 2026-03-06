@@ -3,29 +3,22 @@ package io.github.cygnus_engine;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.math.MathUtils;
-import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
-import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
-import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.Window;
-import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
-import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 
 // todo:
 // add a UI to show current ship info (hp) or cargo or hail the closest ship/planet/station
-// the main menu screen should be turned into a static UI element, with buttons to open up the other screens.
 // keybinds to open inventory screen.
-
-// long-term:
 
 // a lite ship modding system that allows defining the extents of a ship
 // add a ship modding system, which allows importing a texture and/or existing JSON
 // defining the bounds of the ship, and drawing weapon/engine points and center-of-mass
+
+// long-term:
 
 // add a minimap/radar
 // add a star-system UI to jump to another area, and include a procgen system map
@@ -44,18 +37,13 @@ public class Main extends ApplicationAdapter {
     // UI components
     private Stage stage;
     private Skin skin;
-    private Cargo cargo;
-    private CargoMenuScreen cargoMenuScreen;
-    private GameObjectInfoWindow objectInfoWindow;
-    private int[] moneyRef = {1000}; // Starting money
     
     // Screen windows
     private MainMenuScreen mainMenuScreen;
     private ModdingScreen moddingScreen;
-    private Window gameplayWindow;
-
-    // Game world
-    private GameWorld gameWorld;
+    
+    // Game screen (initialized only when user clicks Play)
+    private GameScreen gameScreen;
 
     /**
      * Creates a draggable window, centers it on the stage, and adds it to the stage.
@@ -77,12 +65,6 @@ public class Main extends ApplicationAdapter {
 
         stage = new Stage(new ScreenViewport());
         skin = new Skin(Gdx.files.internal("ui/uiskin.json"));
-        
-        // Initialize game world
-        gameWorld = new GameWorld();
-
-        // Initialize cargo
-        cargo = new Cargo(false);
 
         // Create main menu screen
         mainMenuScreen = new MainMenuScreen(skin, new MainMenuScreen.ScreenListener() {
@@ -104,33 +86,8 @@ public class Main extends ApplicationAdapter {
 
         createAndCenterWindow(mainMenuScreen, stage);
 
-        // Set up input handling - game world clicks first, then UI
+        // Set up input for menu navigation
         InputMultiplexer inputMultiplexer = new InputMultiplexer();
-        inputMultiplexer.addProcessor(new InputAdapter() {
-            @Override
-            public boolean touchDown(int screenX, int screenY, int pointer, int button) {
-                // Only handle game world clicks when in play screen
-                if (currentScreen != ScreenState.PLAY) {
-                    return false;
-                }
-                
-                // Convert screen coordinates (Y is inverted)
-                float clientX = Gdx.graphics.getWidth();
-                float clientY = Gdx.graphics.getHeight();
-
-                Vector3 clickedPos = new Vector3(screenX, screenY, 0);
-                Vector3 unprojected = gameWorld.getCamera().unproject(clickedPos, 0.0f, 0.0f, clientX, clientY);
-
-                // Check if we clicked on a game object
-                GameObject clickedObject = gameWorld.getObjectAt(unprojected.x, unprojected.y);
-                gameWorld.drawClickDebugIndicator(unprojected.x, unprojected.y);
-                if (clickedObject != null) {
-                    showObjectInfo(clickedObject);
-                    return true; // Consume the event
-                }
-                return false; // Let UI handle it
-            }
-        });
         inputMultiplexer.addProcessor(stage);
         Gdx.input.setInputProcessor(inputMultiplexer);
     }
@@ -139,42 +96,14 @@ public class Main extends ApplicationAdapter {
         // Clear stage and show gameplay
         stage.clear();
         currentScreen = ScreenState.PLAY;
-        
-        // Create exit button for gameplay
-        gameplayWindow = new Window("Gameplay", skin, "border");
-        gameplayWindow.defaults().pad(4f);
-        gameplayWindow.add("Welcome to the Trading Game").row();
 
-        // Cargo menu button
-        TextButton cargoButton = new TextButton("View Cargo", skin);
-        cargoButton.pad(8f);
-        cargoButton.addListener(new ChangeListener() {
+        // Initialize game screen (this creates the GameWorld)
+        gameScreen = new GameScreen(stage, skin, new GameScreen.ScreenListener() {
             @Override
-            public void changed(final ChangeEvent event, final Actor actor) {
-                if (cargoMenuScreen == null) {
-                    cargoMenuScreen = new CargoMenuScreen(skin, cargo);
-                    createAndCenterWindow(cargoMenuScreen, stage);
-                } else {
-                    cargoMenuScreen.refresh();
-                    cargoMenuScreen.setVisible(true);
-                }
-            }
-        });
-        gameplayWindow.add(cargoButton);
-
-        // Exit to menu button
-        TextButton exitButton = new TextButton("Exit to Menu", skin);
-        exitButton.pad(8f);
-        exitButton.addListener(new ChangeListener() {
-            @Override
-            public void changed(final ChangeEvent event, final Actor actor) {
+            public void onExitToMenu() {
                 switchToMainMenu();
             }
         });
-        gameplayWindow.add(exitButton);
-        
-        gameplayWindow.addAction(Actions.sequence(Actions.alpha(0f), Actions.fadeIn(1f)));
-        createAndCenterWindow(gameplayWindow, stage);
     }
     
     private void switchToModdingScreen() {
@@ -214,25 +143,19 @@ public class Main extends ApplicationAdapter {
         createAndCenterWindow(mainMenuScreen, stage);
     }
     
-    private void showObjectInfo(GameObject gameObject) {
-        if (objectInfoWindow != null) {
-            objectInfoWindow.remove();
-        }
-        objectInfoWindow = new GameObjectInfoWindow(skin, gameObject, stage, cargo, moneyRef);
-        createAndCenterWindow(objectInfoWindow, stage);
-    }
-
     @Override
     public void render() {
         ScreenUtils.clear(0f, 0f, 0f, 1f);
         
         float deltaTime = Gdx.graphics.getDeltaTime();
         
-        // Update game world
-        gameWorld.update(deltaTime);
-        
-        // Draw game world
-        gameWorld.render();
+        if (currentScreen == ScreenState.PLAY) {
+            // Update game world
+            gameScreen.update(deltaTime);
+            
+            // Draw game world
+            gameScreen.render();
+        }
         
         // Draw UI
         stage.act(deltaTime);
@@ -249,14 +172,12 @@ public class Main extends ApplicationAdapter {
         
         // Only resize game world when in play screen
         if (currentScreen == ScreenState.PLAY) {
-            gameWorld.resize(width, height);
+            gameScreen.resize(width, height);
         }
     }
 
     @Override
     public void dispose() {
         stage.dispose();
-        skin.dispose();
-        gameWorld.dispose();
-    }
+    };
 }
