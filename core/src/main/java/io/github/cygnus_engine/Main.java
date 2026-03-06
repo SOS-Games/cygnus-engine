@@ -14,15 +14,16 @@ import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.utils.ScreenUtils;
-import com.badlogic.gdx.utils.viewport.ExtendViewport;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 
-// todo: keybinds to open inventory screen.
+// todo:
 // add a UI to show current ship info (hp) or cargo or hail the closest ship/planet/station
 // the main menu screen should be turned into a static UI element, with buttons to open up the other screens.
+// keybinds to open inventory screen.
 
 // long-term:
 
+// a lite ship modding system that allows defining the extents of a ship
 // add a ship modding system, which allows importing a texture and/or existing JSON
 // defining the bounds of the ship, and drawing weapon/engine points and center-of-mass
 
@@ -33,15 +34,25 @@ import com.badlogic.gdx.utils.viewport.ScreenViewport;
 
 /** {@link com.badlogic.gdx.ApplicationListener} implementation shared by all platforms. */
 public class Main extends ApplicationAdapter {
+    // Screen states
+    private enum ScreenState {
+        MAIN_MENU, PLAY, MODDING
+    }
+    
+    private ScreenState currentScreen = ScreenState.MAIN_MENU;
+    
     // UI components
     private Stage stage;
     private Skin skin;
     private Cargo cargo;
-    private Window mainWindow;
-    //private TradeScreen tradeScreen;
     private CargoMenuScreen cargoMenuScreen;
     private GameObjectInfoWindow objectInfoWindow;
     private int[] moneyRef = {1000}; // Starting money
+    
+    // Screen windows
+    private MainMenuScreen mainMenuScreen;
+    private ModdingScreen moddingScreen;
+    private Window gameplayWindow;
 
     // Game world
     private GameWorld gameWorld;
@@ -63,7 +74,6 @@ public class Main extends ApplicationAdapter {
 
     @Override
     public void create() {
-        //stage = new Stage(new ExtendViewport(800, 600, gameWorld.getCamera()));
 
         stage = new Stage(new ScreenViewport());
         skin = new Skin(Gdx.files.internal("ui/uiskin.json"));
@@ -74,34 +84,66 @@ public class Main extends ApplicationAdapter {
         // Initialize cargo
         cargo = new Cargo(false);
 
-        // Create main menu window
-        mainWindow = new Window("Main Menu", skin, "border");
-        mainWindow.defaults().pad(4f);
-        mainWindow.add("Welcome to the Trading Game").row();
-        
-        // Trade button
-        /*
-        TextButton tradeButton = new TextButton("Open Trade Screen", skin);
-        tradeButton.pad(8f);
-        tradeButton.addListener(new ChangeListener() {
+        // Create main menu screen
+        mainMenuScreen = new MainMenuScreen(skin, new MainMenuScreen.ScreenListener() {
             @Override
-            public void changed(final ChangeEvent event, final Actor actor) {
-                if (tradeScreen == null) {
-                    tradeScreen = new TradeScreen(skin, cargo, moneyRef, null);
-                    createAndCenterWindow(tradeScreen, stage);
-                } else {
-                    // Update money in case it changed
-                    if (tradeScreen.getMoney() != moneyRef[0]) {
-                        tradeScreen.remove();
-                        tradeScreen = new TradeScreen(skin, cargo, moneyRef, null);
-                        createAndCenterWindow(tradeScreen, stage);
-                    }
-                    tradeScreen.setVisible(true);
-                }
+            public void onPlayPressed() {
+                switchToPlayScreen();
+            }
+
+            @Override
+            public void onModdingPressed() {
+                switchToModdingScreen();
+            }
+
+            @Override
+            public void onExitPressed() {
+                Gdx.app.exit();
             }
         });
-        mainWindow.add(tradeButton).row();
-        */
+
+        createAndCenterWindow(mainMenuScreen, stage);
+
+        // Set up input handling - game world clicks first, then UI
+        InputMultiplexer inputMultiplexer = new InputMultiplexer();
+        inputMultiplexer.addProcessor(new InputAdapter() {
+            @Override
+            public boolean touchDown(int screenX, int screenY, int pointer, int button) {
+                // Only handle game world clicks when in play screen
+                if (currentScreen != ScreenState.PLAY) {
+                    return false;
+                }
+                
+                // Convert screen coordinates (Y is inverted)
+                float clientX = Gdx.graphics.getWidth();
+                float clientY = Gdx.graphics.getHeight();
+
+                Vector3 clickedPos = new Vector3(screenX, screenY, 0);
+                Vector3 unprojected = gameWorld.getCamera().unproject(clickedPos, 0.0f, 0.0f, clientX, clientY);
+
+                // Check if we clicked on a game object
+                GameObject clickedObject = gameWorld.getObjectAt(unprojected.x, unprojected.y);
+                gameWorld.drawClickDebugIndicator(unprojected.x, unprojected.y);
+                if (clickedObject != null) {
+                    showObjectInfo(clickedObject);
+                    return true; // Consume the event
+                }
+                return false; // Let UI handle it
+            }
+        });
+        inputMultiplexer.addProcessor(stage);
+        Gdx.input.setInputProcessor(inputMultiplexer);
+    }
+    
+    private void switchToPlayScreen() {
+        // Clear stage and show gameplay
+        stage.clear();
+        currentScreen = ScreenState.PLAY;
+        
+        // Create exit button for gameplay
+        gameplayWindow = new Window("Gameplay", skin, "border");
+        gameplayWindow.defaults().pad(4f);
+        gameplayWindow.add("Welcome to the Trading Game").row();
 
         // Cargo menu button
         TextButton cargoButton = new TextButton("View Cargo", skin);
@@ -118,78 +160,58 @@ public class Main extends ApplicationAdapter {
                 }
             }
         });
-        mainWindow.add(cargoButton);
-        
-        // Center the main window
-        mainWindow.addAction(Actions.sequence(Actions.alpha(0f), Actions.fadeIn(1f)));
-        createAndCenterWindow(mainWindow, stage);
+        gameplayWindow.add(cargoButton);
 
-        // Set up input handling - game world clicks first, then UI
-        InputMultiplexer inputMultiplexer = new InputMultiplexer();
-        inputMultiplexer.addProcessor(new InputAdapter() {
+        // Exit to menu button
+        TextButton exitButton = new TextButton("Exit to Menu", skin);
+        exitButton.pad(8f);
+        exitButton.addListener(new ChangeListener() {
             @Override
-            public boolean touchDown(int screenX, int screenY, int pointer, int button) {
-                
-                //float worldX = screenX;
-                //float worldY = clientY - screenY;
-                // convert to percentage
-                //float worldXDivided = worldX / clientX;
-                //float worldYDivided = worldY / clientY;
-                //System.out.println("worldXDivided: " + worldXDivided + " worldYDivided: " + worldYDivided);
-
-                // if the viewport size increases, then the clicked x coordinate will be more in the center (to the right)
-                // but why is the clicked y coordinate stable?
-                // because objects are not moved up in the viewport, they are still centered, so y is stable
-                
-                // the true x,y world coordinate doesn't matter in my calculation - what matters is the padding
-                // how do I get world coordinate from the camera?
-
-                // camera viewportWidth and viewportHeight are clientX and clientY
-                // WORLD_WIDTH and WORLD_HEIGHT are fixed
-
-                // I should not use screen/viewport coordinates.
-
-                // world size will always be the same.
-                // camera position/scale might change.
-                // the camera will always be centered.
-                // the world will not always be centered with the camera
-                
-
-                // to get world position clicked, find the offset from the camera position,
-                // based on the camera scale
-
-                // for now, assume camera position is unchanging
-                // camera scale/viewport is the same as clientX/clientY
-
-                // in an unscaled viewport, the it goes from 0 to WORLD_WIDTH, and 0 to WORLD_HEIGHT
-                // in a scaled viewport, the world coordinates are the same
-
-                // even in a normal viewport, the click indicator is not where the user clicked
-                // the click will scaled based on the viewport size
-                // if a normal viewport, it'll be scaled out from the click location
-                // if scaled out viewport, the click location will scaled in
-
-                
-                // Convert screen coordinates (Y is inverted)
-                float clientX = Gdx.graphics.getWidth();
-                float clientY = Gdx.graphics.getHeight();
-
-                Vector3 clickedPos = new Vector3(screenX, screenY, 0);
-                Vector3 unprojected = gameWorld.getCamera().unproject(clickedPos, 0.0f, 0.0f, clientX, clientY);
-                // WHOOO THIS WORKS (unproject)
-
-                // Check if we clicked on a game object
-                GameObject clickedObject = gameWorld.getObjectAt(unprojected.x, unprojected.y);
-                gameWorld.drawClickDebugIndicator(unprojected.x, unprojected.y);
-                if (clickedObject != null) {
-                    showObjectInfo(clickedObject);
-                    return true; // Consume the event
-                }
-                return false; // Let UI handle it
+            public void changed(final ChangeEvent event, final Actor actor) {
+                switchToMainMenu();
             }
         });
-        inputMultiplexer.addProcessor(stage);
-        Gdx.input.setInputProcessor(inputMultiplexer);
+        gameplayWindow.add(exitButton);
+        
+        gameplayWindow.addAction(Actions.sequence(Actions.alpha(0f), Actions.fadeIn(1f)));
+        createAndCenterWindow(gameplayWindow, stage);
+    }
+    
+    private void switchToModdingScreen() {
+        stage.clear();
+        currentScreen = ScreenState.MODDING;
+        
+        moddingScreen = new ModdingScreen(skin, new ModdingScreen.ScreenListener() {
+            @Override
+            public void onBackPressed() {
+                switchToMainMenu();
+            }
+        });
+        createAndCenterWindow(moddingScreen, stage);
+    }
+    
+    private void switchToMainMenu() {
+        stage.clear();
+        currentScreen = ScreenState.MAIN_MENU;
+        
+        // Reset menu screen
+        mainMenuScreen = new MainMenuScreen(skin, new MainMenuScreen.ScreenListener() {
+            @Override
+            public void onPlayPressed() {
+                switchToPlayScreen();
+            }
+
+            @Override
+            public void onModdingPressed() {
+                switchToModdingScreen();
+            }
+
+            @Override
+            public void onExitPressed() {
+                Gdx.app.exit();
+            }
+        });
+        createAndCenterWindow(mainMenuScreen, stage);
     }
     
     private void showObjectInfo(GameObject gameObject) {
@@ -215,11 +237,6 @@ public class Main extends ApplicationAdapter {
         // Draw UI
         stage.act(deltaTime);
         stage.draw();
-        
-        // Update money from trade screen if it exists and is visible
-        //if (tradeScreen != null && tradeScreen.isVisible()) {
-        //    moneyRef[0] = tradeScreen.getMoney();
-        //}
     }
 
     @Override
@@ -229,7 +246,11 @@ public class Main extends ApplicationAdapter {
         if(width <= 0 || height <= 0) return;
 
         stage.getViewport().update(width, height, true);
-        gameWorld.resize(width, height);
+        
+        // Only resize game world when in play screen
+        if (currentScreen == ScreenState.PLAY) {
+            gameWorld.resize(width, height);
+        }
     }
 
     @Override

@@ -3,12 +3,6 @@ package io.github.cygnus_engine;
 import com.badlogic.gdx.math.MathUtils;
 
 // todo:
-// ships need cargo and trading
-// ships should have limited cargo with random contents
-
-// how should trading work? Should commodity prices be varied?
-// you need to be able to profit, so the simplest case would be to slightly randomize the commodity prices
-// then each ship you trade with would have slightly different prices.
 
 // I need to separate ship movement from the ship class, I need a movement class. I need a single ship class.
 
