@@ -93,11 +93,9 @@ public class Main extends ApplicationAdapter {
     }
     
     private void switchToPlayScreen() {
-        // Clear stage and show gameplay
         stage.clear();
         currentScreen = ScreenState.PLAY;
 
-        // Initialize game screen (this creates the GameWorld)
         gameScreen = new GameScreen(stage, skin, new GameScreen.ScreenListener() {
             @Override
             public void onExitToMenu() {
@@ -110,20 +108,18 @@ public class Main extends ApplicationAdapter {
         stage.clear();
         currentScreen = ScreenState.MODDING;
         
-        moddingScreen = new ModdingScreen(skin, new ModdingScreen.ScreenListener() {
+        moddingScreen = new ModdingScreen(stage, skin, new ModdingScreen.ScreenListener() {
             @Override
             public void onBackPressed() {
                 switchToMainMenu();
             }
         });
-        createAndCenterWindow(moddingScreen, stage);
     }
     
     private void switchToMainMenu() {
         stage.clear();
         currentScreen = ScreenState.MAIN_MENU;
         
-        // Reset menu screen
         mainMenuScreen = new MainMenuScreen(skin, new MainMenuScreen.ScreenListener() {
             @Override
             public void onPlayPressed() {
@@ -150,11 +146,11 @@ public class Main extends ApplicationAdapter {
         float deltaTime = Gdx.graphics.getDeltaTime();
         
         if (currentScreen == ScreenState.PLAY) {
-            // Update game world
             gameScreen.update(deltaTime);
-            
-            // Draw game world
             gameScreen.render();
+        } else if (currentScreen == ScreenState.MODDING) {
+            moddingScreen.update(deltaTime);
+            moddingScreen.render();
         }
         
         // Draw UI
