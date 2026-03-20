@@ -34,6 +34,7 @@ public class ModdingScreen {
     private TextField speedField;
     private TextField maneuverField;
     private TextField cargoField;
+    private TextButton symmetryButton;
 
     public ModdingScreen(Stage stage, Skin skin, ScreenListener listener) {
         this.stage = stage;
@@ -200,6 +201,23 @@ public class ModdingScreen {
             }
         });
 
+        TextButton addColliderButton = new TextButton("Add Collider Vertex", skin);
+        addColliderButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                shipEditor.addColliderVertex();
+            }
+        });
+
+        symmetryButton = new TextButton(symmetryButtonText(), skin);
+        symmetryButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                shipEditor.setSymmetryEnabled(!shipEditor.isSymmetryEnabled());
+                symmetryButton.setText(symmetryButtonText());
+            }
+        });
+
         TextButton saveButton = new TextButton("Save JSON", skin);
         saveButton.addListener(new ChangeListener() {
             @Override
@@ -213,6 +231,8 @@ public class ModdingScreen {
         editorWindow.add(backButton).left();
         editorWindow.add(addWeaponButton);
         editorWindow.add(addEngineButton);
+        editorWindow.add(addColliderButton);
+        editorWindow.add(symmetryButton);
         editorWindow.add(saveButton).right().row();
 
         ShipData d = shipEditor.getShipData();
@@ -230,7 +250,7 @@ public class ModdingScreen {
         fields.add(cargoField).width(120f).row();
 
         editorWindow.add(fields).left().row();
-        editorWindow.add(new Label("Drag: COM (cyan), weapon (red), engines (orange), bounds corners (green).", skin)).left().row();
+        editorWindow.add(new Label("Drag: COM (blue), weapon (red), engines (orange), collider (cyan), bounds corners (green).", skin)).left().row();
 
         editorWindow.pack();
         editorWindow.setPosition(10f, Math.max(10f, stage.getHeight() - editorWindow.getHeight() - 10f));
@@ -253,6 +273,10 @@ public class ModdingScreen {
         } catch (Exception ignored) {
             return fallback;
         }
+    }
+
+    private String symmetryButtonText() {
+        return shipEditor.isSymmetryEnabled() ? "Symmetry: ON" : "Symmetry: OFF";
     }
 
     /** Tiny dynamic array helper to keep this file dependency-light. */

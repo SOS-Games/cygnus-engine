@@ -29,4 +29,6 @@ public class ShipData {
     public Vector2 centerOfMass = new Vector2();
     public List<Vector2> weaponSlots = new ArrayList<Vector2>();
     public List<Vector2> enginePositions = new ArrayList<Vector2>();
+    /** Polygon-like collider vertices relative to ship center. */
+    public List<Vector2> colliderVertices = new ArrayList<Vector2>();
 }
