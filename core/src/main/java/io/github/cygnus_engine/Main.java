@@ -2,10 +2,8 @@ package io.github.cygnus_engine;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
-import com.badlogic.gdx.scenes.scene2d.ui.Window;
 import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
@@ -45,21 +43,6 @@ public class Main extends ApplicationAdapter {
     // Game screen (initialized only when user clicks Play)
     private GameScreen gameScreen;
 
-    /**
-     * Creates a draggable window, centers it on the stage, and adds it to the stage.
-     * @param window The window to add and center
-     * @param stage The stage to add the window to
-     */
-    private void createAndCenterWindow(Window window, Stage stage) {
-        window.setMovable(true);
-        window.pack();
-        window.setPosition(
-            MathUtils.roundPositive(stage.getWidth() / 2f - window.getWidth() / 2f),
-            MathUtils.roundPositive(stage.getHeight() / 2f - window.getHeight() / 2f)
-        );
-        stage.addActor(window);
-    }
-
     @Override
     public void create() {
 
@@ -84,7 +67,7 @@ public class Main extends ApplicationAdapter {
             }
         });
 
-        createAndCenterWindow(mainMenuScreen, stage);
+        UiWindowUtils.createAndCenterWindow(mainMenuScreen, stage);
 
         // Set up input for menu navigation
         InputMultiplexer inputMultiplexer = new InputMultiplexer();
@@ -136,7 +119,7 @@ public class Main extends ApplicationAdapter {
                 Gdx.app.exit();
             }
         });
-        createAndCenterWindow(mainMenuScreen, stage);
+        UiWindowUtils.createAndCenterWindow(mainMenuScreen, stage);
     }
     
     @Override
@@ -169,6 +152,8 @@ public class Main extends ApplicationAdapter {
         // Only resize game world when in play screen
         if (currentScreen == ScreenState.PLAY) {
             gameScreen.resize(width, height);
+        } else if (currentScreen == ScreenState.MODDING) {
+            moddingScreen.resize(width, height);
         }
     }
 

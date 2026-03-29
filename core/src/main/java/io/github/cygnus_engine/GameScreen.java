@@ -3,7 +3,6 @@ package io.github.cygnus_engine;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
-import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
@@ -56,7 +55,7 @@ public class GameScreen {
             public void changed(final ChangeEvent event, final Actor actor) {
                 if (cargoMenuScreen == null) {
                     cargoMenuScreen = new CargoMenuScreen(skin, cargo);
-                    createAndCenterWindow(cargoMenuScreen);
+                    UiWindowUtils.createAndCenterWindow(cargoMenuScreen, stage);
                 } else {
                     cargoMenuScreen.refresh();
                     cargoMenuScreen.setVisible(true);
@@ -79,7 +78,7 @@ public class GameScreen {
         gameplayWindow.add(exitButton);
         
         gameplayWindow.addAction(Actions.sequence(Actions.alpha(0f), Actions.fadeIn(1f)));
-        createAndCenterWindow(gameplayWindow);
+        UiWindowUtils.createAndCenterWindow(gameplayWindow, stage);
     }
 
     private void setupInputHandling() {
@@ -108,22 +107,12 @@ public class GameScreen {
         Gdx.input.setInputProcessor(inputMultiplexer);
     }
 
-    private void createAndCenterWindow(Window window) {
-        window.setMovable(true);
-        window.pack();
-        window.setPosition(
-            MathUtils.roundPositive(stage.getWidth() / 2f - window.getWidth() / 2f),
-            MathUtils.roundPositive(stage.getHeight() / 2f - window.getHeight() / 2f)
-        );
-        stage.addActor(window);
-    }
-
     private void showObjectInfo(GameObject gameObject) {
         if (objectInfoWindow != null) {
             objectInfoWindow.remove();
         }
         objectInfoWindow = new GameObjectInfoWindow(skin, gameObject, stage, cargo, moneyRef);
-        createAndCenterWindow(objectInfoWindow);
+        UiWindowUtils.createAndCenterWindow(objectInfoWindow, stage);
     }
 
     public void update(float deltaTime) {

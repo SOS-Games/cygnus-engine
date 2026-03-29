@@ -35,6 +35,7 @@ public class ModdingScreen {
     private TextField maneuverField;
     private TextField cargoField;
     private TextButton symmetryButton;
+    private TextButton insertModeButton;
 
     public ModdingScreen(Stage stage, Skin skin, ScreenListener listener) {
         this.stage = stage;
@@ -91,12 +92,7 @@ public class ModdingScreen {
 
         listWindow.add(scrollPane).width(520f).height(360f).row();
 
-        listWindow.pack();
-        listWindow.setPosition(
-            Math.max(10f, stage.getWidth() / 2f - listWindow.getWidth() / 2f),
-            Math.max(10f, stage.getHeight() / 2f - listWindow.getHeight() / 2f)
-        );
-        stage.addActor(listWindow);
+        UiWindowUtils.createAndCenterWindow(listWindow, stage, 10f);
     }
 
     private static class ShipEntry {
@@ -209,6 +205,15 @@ public class ModdingScreen {
             }
         });
 
+        insertModeButton = new TextButton(insertModeButtonText(), skin);
+        insertModeButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                shipEditor.setInsertModeEnabled(!shipEditor.isInsertModeEnabled());
+                insertModeButton.setText(insertModeButtonText());
+            }
+        });
+
         symmetryButton = new TextButton(symmetryButtonText(), skin);
         symmetryButton.addListener(new ChangeListener() {
             @Override
@@ -232,6 +237,7 @@ public class ModdingScreen {
         editorWindow.add(addWeaponButton);
         editorWindow.add(addEngineButton);
         editorWindow.add(addColliderButton);
+        editorWindow.add(insertModeButton);
         editorWindow.add(symmetryButton);
         editorWindow.add(saveButton).right().row();
 
@@ -250,7 +256,7 @@ public class ModdingScreen {
         fields.add(cargoField).width(120f).row();
 
         editorWindow.add(fields).left().row();
-        editorWindow.add(new Label("Drag: COM (blue), weapon (red), engines (orange), collider (cyan), bounds corners (green).", skin)).left().row();
+        editorWindow.add(new Label("Drag points directly. Hovered points are yellow. Insert mode: click white-highlighted collider edges to add vertices.", skin)).left().row();
 
         editorWindow.pack();
         editorWindow.setPosition(10f, Math.max(10f, stage.getHeight() - editorWindow.getHeight() - 10f));
@@ -277,6 +283,10 @@ public class ModdingScreen {
 
     private String symmetryButtonText() {
         return shipEditor.isSymmetryEnabled() ? "Symmetry: ON" : "Symmetry: OFF";
+    }
+
+    private String insertModeButtonText() {
+        return shipEditor.isInsertModeEnabled() ? "Insert: ON" : "Insert: OFF";
     }
 
     /** Tiny dynamic array helper to keep this file dependency-light. */
