@@ -39,6 +39,7 @@ public class GameScreen {
         
         setupUI();
         setupInputHandling();
+        resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
     }
 
     private void setupUI() {

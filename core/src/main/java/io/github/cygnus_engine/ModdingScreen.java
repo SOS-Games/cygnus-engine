@@ -45,6 +45,7 @@ public class ModdingScreen {
 
         buildListUI();
         setupInput();
+        resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
     }
 
     private void setupInput() {
