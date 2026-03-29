@@ -63,12 +63,17 @@ public class SpaceShip extends GameObject {
     
     public SpaceShip(float x, float y, float size, String name, 
                            GameObject planet, GameObject spaceStation) {
+        this(x, y, size, name, planet, spaceStation, -1f);
+    }
+
+    public SpaceShip(float x, float y, float size, String name,
+                           GameObject planet, GameObject spaceStation, float configuredMaxSpeed) {
         super(Type.SPACE_SHIP, x, y, size, name);
         this.planet = planet;
         this.spaceStation = spaceStation;
         this.prevX = x;
         this.prevY = y;
-        this.maxNormalSpeed = MathUtils.random(40f, 80f);
+        this.maxNormalSpeed = configuredMaxSpeed > 0f ? configuredMaxSpeed : MathUtils.random(40f, 80f);
         this.currentSpeed = maxNormalSpeed;
         this.directionChangeTimer = 0f;
         this.directionChangeInterval = MathUtils.random(2f, 5f);

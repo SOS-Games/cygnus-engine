@@ -5,10 +5,10 @@ import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Sprite;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.files.FileHandle;
 
 public class GameWorld {
     private static final float WORLD_WIDTH = 800f;
@@ -25,8 +25,11 @@ public class GameWorld {
     private GameObject debugIndicator;
 
     private SpriteBatch spriteBatch; // For future use with textures and fonts
-    private Texture playerTexture; // Placeholder for player ship texture
-    private Sprite playerSprite; // Sprite for player ship (if using SpriteBatch)
+    private Texture playerTexture;
+    private Sprite playerSprite;
+    private ShipData playerShipData;
+    private float playerShipRadius = 18f;
+    private float npcShipMaxSpeed = 60f;
     
     public GameWorld() {
         shapeRenderer = new ShapeRenderer();
@@ -42,15 +45,38 @@ public class GameWorld {
 
         spriteBatch = new SpriteBatch();
         spriteBatch.setProjectionMatrix(camera.combined);
-        playerTexture = new Texture("images/fighter.png");
-
-        playerTexture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
-        playerSprite = new Sprite(playerTexture);
-        playerSprite.setSize(20f, 20f);
-        playerSprite.rotate90(false);
-        playerSprite.setOriginCenter();
+        loadPlayerShip("fighter");
 
         initialize();
+    }
+
+    private void loadPlayerShip(String shipId) {
+        FileHandle textureFile = com.badlogic.gdx.Gdx.files.local("mods/core/" + shipId + ".png");
+        playerShipData = ShipDataIO.loadOrCreateDefault(textureFile);
+
+        FileHandle resolvedTexture = com.badlogic.gdx.Gdx.files.local(playerShipData.texturePath);
+        if (!resolvedTexture.exists()) {
+            resolvedTexture = com.badlogic.gdx.Gdx.files.internal("images/" + shipId + ".png");
+        }
+
+        playerTexture = new Texture(resolvedTexture);
+        playerTexture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        playerSprite = new Sprite(playerTexture);
+
+        float spriteWidth = 20f;
+        float spriteHeight = 20f;
+        if (playerShipData.bounds != null && playerShipData.bounds.width > 0f && playerShipData.bounds.height > 0f) {
+            spriteWidth = playerShipData.bounds.width;
+            spriteHeight = playerShipData.bounds.height;
+        }
+        playerSprite.setSize(spriteHeight, spriteWidth);
+        playerSprite.setOrigin(
+            playerSprite.getWidth() * 0.5f + playerShipData.centerOfMass.x,
+            playerSprite.getHeight() * 0.5f + playerShipData.centerOfMass.y
+        );
+        playerSprite.rotate90(true);
+        playerShipRadius = Math.max(spriteWidth, spriteHeight) * 0.5f;
+        npcShipMaxSpeed = Math.max(10f, playerShipData.speed * 20f);
     }
     
     private void initialize() {
@@ -69,8 +95,15 @@ public class GameWorld {
         for (int i = 0; i < 6; i++) {
             float x = MathUtils.random(100f, WORLD_WIDTH - 100f);
             float y = MathUtils.random(100f, WORLD_HEIGHT - 100f);
-            SpaceShip ship = new SpaceShip(x, y, 18f, "Random Ship " + (i + 1), 
-                                                        planet, spaceStation);
+            SpaceShip ship = new SpaceShip(
+                x,
+                y,
+                playerShipRadius,
+                "Random Ship " + (i + 1),
+                planet,
+                spaceStation,
+                npcShipMaxSpeed
+            );
             spaceShips.add(ship);
             gameObjects.add(ship);
         }
@@ -133,9 +166,8 @@ public class GameWorld {
                     //shapeRenderer.setColor(Color.GREEN);
                     //drawRotatedTriangle(obj.getX(), obj.getY(), obj.getSize(), obj.getRotation());
 
-                    float halfSizeShip = obj.getSize() * 0.5f;
                     spriteBatch.begin();
-                    playerSprite.setPosition(obj.getX() - halfSizeShip, obj.getY() - halfSizeShip);
+                    playerSprite.setPosition(obj.getX() - playerSprite.getOriginX(), obj.getY() - playerSprite.getOriginY());
                     playerSprite.setRotation(obj.getRotation());
                     playerSprite.draw(spriteBatch);
                     spriteBatch.end();
@@ -232,5 +264,7 @@ public class GameWorld {
     
     public void dispose() {
         shapeRenderer.dispose();
+        spriteBatch.dispose();
+        if (playerTexture != null) playerTexture.dispose();
     }
 }
