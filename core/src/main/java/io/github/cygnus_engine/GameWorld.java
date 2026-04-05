@@ -23,6 +23,7 @@ public class GameWorld {
     private float warpTimer;
     private float warpInterval;
     private GameObject debugIndicator;
+    private GameObject clickedObject;
 
     private SpriteBatch spriteBatch; // For future use with textures and fonts
     private Texture playerTexture;
@@ -76,7 +77,7 @@ public class GameWorld {
         );
         playerSprite.rotate90(true);
         playerShipRadius = Math.max(spriteWidth, spriteHeight) * 0.5f;
-        npcShipMaxSpeed = Math.max(10f, playerShipData.speed * 20f);
+        npcShipMaxSpeed = playerShipData.speed;
     }
     
     private void initialize() {
@@ -135,6 +136,10 @@ public class GameWorld {
                 int index = MathUtils.random(spaceShips.size - 1);
                 spaceShips.get(index).triggerWarpOut();
             }
+        }
+
+        if (clickedObject != null) {
+            drawClickDebugIndicator(clickedObject.getX(), clickedObject.getY(), clickedObject);
         }
     }
     
@@ -249,9 +254,12 @@ public class GameWorld {
         return null;
     }
 
-    public void drawClickDebugIndicator(float x, float y) {
+    public void drawClickDebugIndicator(float x, float y, GameObject clickedObject) {
         debugIndicator.setX(x);
         debugIndicator.setY(y);
+        if (clickedObject != null) {
+            this.clickedObject = clickedObject;
+        }
     }
 
     public GameObject getPlanet() {

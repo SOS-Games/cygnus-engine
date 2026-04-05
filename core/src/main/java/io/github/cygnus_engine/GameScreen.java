@@ -96,7 +96,7 @@ public class GameScreen {
 
                 // Check if we clicked on a game object
                 GameObject clickedObject = gameWorld.getObjectAt(unprojected.x, unprojected.y);
-                gameWorld.drawClickDebugIndicator(unprojected.x, unprojected.y);
+                gameWorld.drawClickDebugIndicator(unprojected.x, unprojected.y, clickedObject);
                 if (clickedObject != null) {
                     showObjectInfo(clickedObject);
                     return true; // Consume the event

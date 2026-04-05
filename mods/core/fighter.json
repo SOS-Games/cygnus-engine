@@ -2,7 +2,7 @@
 "id": "fighter",
 "name": "fighter",
 "texturePath": "mods/core/fighter.png",
-"speed": 10,
+"speed": 200,
 "maneuverability": 2,
 "cargoSpace": 2,
 "bounds": {

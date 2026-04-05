@@ -58,12 +58,8 @@ public class SpaceShip extends GameObject {
         FLYING_TO_TARGET,
         FLYING_AROUND_TARGET,
         WARPING_OUT,
-        WARPING_IN
-    }
-    
-    public SpaceShip(float x, float y, float size, String name, 
-                           GameObject planet, GameObject spaceStation) {
-        this(x, y, size, name, planet, spaceStation, -1f);
+        WARPED_OUT,
+        WARPING_IN,
     }
 
     public SpaceShip(float x, float y, float size, String name,
@@ -73,15 +69,15 @@ public class SpaceShip extends GameObject {
         this.spaceStation = spaceStation;
         this.prevX = x;
         this.prevY = y;
-        this.maxNormalSpeed = configuredMaxSpeed > 0f ? configuredMaxSpeed : MathUtils.random(40f, 80f);
+        this.maxNormalSpeed = configuredMaxSpeed;
         this.currentSpeed = maxNormalSpeed;
         this.directionChangeTimer = 0f;
-        this.directionChangeInterval = MathUtils.random(2f, 5f);
-        this.maxDistanceFromObjects = 60f;
+        this.directionChangeInterval = 2f;
+        this.maxDistanceFromObjects = 300f;
 
         this.cargo = new Cargo(true);
         
-        this.warpSpeed = 200f;
+        this.warpSpeed = 600f;
         this.warpTimer = 0f;
 
         float currentAngle = MathUtils.random(0f, 360f);
@@ -96,6 +92,9 @@ public class SpaceShip extends GameObject {
             case WARPING_OUT:
                 warpOut(deltaTime);
                 break;
+            case WARPED_OUT:
+                warpedOut(deltaTime);
+                return; // do not update position or rotation, ship should not be moving
             case WARPING_IN:
                 warpIn(deltaTime);
                 break;
@@ -112,34 +111,59 @@ public class SpaceShip extends GameObject {
         warpTimer += deltaTime;
 
         // we should go from maxNormalSpeed to warpSpeed over the course of 2 seconds, then disappear
-        currentSpeed = MathUtils.lerp(maxNormalSpeed, warpSpeed, warpTimer / 2f);
+        float _warpTimer = MathUtils.clamp(warpTimer, 0f, 2f);
+        currentSpeed = MathUtils.lerp(maxNormalSpeed, warpSpeed, _warpTimer / 2f);
         
         // note: let updatePostion handle the actual movement based on currentSpeed and rotation, we just need to set the rotation towards the direction we want to warp out in
         
-        // Disappear after 3 seconds
-        if (warpTimer > 3f) {
-            System.out.println("Warp out ... ship disappeared");
+        // Disappear after getting away from the planet or station
+        if ((getDistanceTo(planet) > 2000f || getDistanceTo(spaceStation) > 2000f) && warpTimer > 2f) {
+            //System.out.println("Warp out ... ship disappeared");
             isVisible = false;
-            // Schedule warp in after a delay (2-4 seconds)
-            warpTimer = -MathUtils.random(2f, 4f); // Negative to count up to 0
+            // Schedule warp in after a delay
+            warpTimer = 0f;
+            currentBehavior = Behavior.WARPED_OUT;
+        }
+    }
+
+    private void warpedOut(float deltaTime) {
+        // ship should not be moving during this time
+        warpTimer += deltaTime;
+        if (warpTimer > 2f) {
             currentBehavior = Behavior.WARPING_IN;
+            warpTimer = 0f;
+
+            // move ship 1000px away from the planet at a random offset position and point it towards the planet
+            
+            float angleToPlanet = MathUtils.random(0f, 360f);
+            setRotation(angleToPlanet);
+
+            float rad = (float) Math.toRadians(angleToPlanet);
+            float dx = 1000f * (float) Math.cos(rad);
+            float dy = 1000f * (float) Math.sin(rad);
+
+            setX(planet.getX() - dx);
+            setY(planet.getY() - dy);
         }
     }
 
     private void warpIn(float deltaTime) {
+        //System.out.println("Warp in ... ship reappeared");
+        isVisible = true;
+
         warpTimer += deltaTime;
 
         // we should go from warpSpeed to maxNormalSpeed over the course of 2 seconds, then switch to normal flying
-        currentSpeed = MathUtils.lerp(warpSpeed, maxNormalSpeed, warpTimer / 2f);
+        float _warpTimer = MathUtils.clamp(warpTimer, 0f, 2f);
+        currentSpeed = MathUtils.lerp(warpSpeed, maxNormalSpeed, _warpTimer / 2f);
         
         // note: let updatePostion handle the actual movement based on currentSpeed and rotation, we just need to set the rotation towards the direction we want to warp in from
-        adjustCourseIfNeeded();
+        //adjustCourseIfNeeded();
 
-        // Become visible after 1 seconds
-        if (warpTimer > 1f) {
-            System.out.println("Warp in ... ship reappeared");
-            isVisible = true;
-            currentBehavior = Behavior.FLYING_AROUND_TARGET; // or FLYING_TO_TARGET based on your design
+        // switch to normal flying if we are close to the planet or station
+        if ((getDistanceTo(planet) < 1000f || getDistanceTo(spaceStation) < 1000f) && warpTimer > 2f) {
+            warpTimer = 0f;
+            currentBehavior = Behavior.FLYING_AROUND_TARGET;
         }
     }
 
@@ -151,7 +175,7 @@ public class SpaceShip extends GameObject {
         // Change direction periodically
         if (directionChangeTimer >= directionChangeInterval) {
             directionChangeTimer = 0f;
-            directionChangeInterval = MathUtils.random(2f, 5f);
+            directionChangeInterval = 2f;
             // Change angle slightly (smooth turns)
             _angle += MathUtils.random(-45f, 45f);
             _angle = _angle % 360f;
@@ -233,14 +257,23 @@ public class SpaceShip extends GameObject {
     }
 
     public void triggerWarpOut() {
-        if (currentBehavior != Behavior.WARPING_OUT && currentBehavior != Behavior.WARPING_IN) {
+        if (currentBehavior != Behavior.WARPING_OUT && currentBehavior != Behavior.WARPED_OUT && currentBehavior != Behavior.WARPING_IN) {
             currentBehavior = Behavior.WARPING_OUT;
             warpTimer = 0f;
+            //System.out.println("Warping out, maxNormalSpeed , warpSpeed: " + maxNormalSpeed + " , " + warpSpeed);
         }
     }
     
     public boolean isVisible() {
         return isVisible;
+    }
+
+    public Behavior getCurrentBehavior() {
+        return currentBehavior;
+    }
+
+    public float getWarpTimer() {
+        return warpTimer;
     }
     
     public Cargo getCargo() {
