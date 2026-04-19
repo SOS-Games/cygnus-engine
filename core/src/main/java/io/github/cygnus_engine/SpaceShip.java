@@ -36,15 +36,30 @@ import com.badlogic.gdx.math.MathUtils;
 
 
 public class SpaceShip extends GameObject {
-    private GameObject orbitTarget;
+    private GameObject orbitTarget = null;
+    private GameObject combatTarget = null;
     private float prevX, prevY = 0f;
     private float currentSpeed = 0f;
     private float maxNormalSpeed = 10f;
     private float targetAngle = 0f; // Desired direction in degrees
     private float directionChangeTimer = 0f;
     private float directionChangeInterval = 2f;
-    private float maxDistanceFromObjects = 100f;
     private float maneuverability = 1f; // limits maximum rotationChange per frame
+    private float seekCombatTargetTimer = 0f;
+    private float seekCombatTargetInterval = 0.5f;
+
+    private float detectCombatDistance = 200f;
+
+    private float maxDistanceFromOrbitTarget = 100f;
+
+    private float exitWarpWhenCloseToOrbitTargetDistance = 1000f;
+    private float enterWarpWhenFarFromOrbitTargetDistance = 2000f;
+
+    // don't manually set these squared values!
+    private float maxDistanceFromOrbitTargetSquared;
+    private float detectCombatDistanceSquared;
+    private float exitWarpWhenCloseToOrbitTargetDistanceSquared;
+    private float enterWarpWhenFarFromOrbitTargetDistanceSquared;
 
     private Cargo cargo;
 
@@ -73,6 +88,11 @@ public class SpaceShip extends GameObject {
 
         this.cargo = new Cargo(true);
         
+        maxDistanceFromOrbitTargetSquared = maxDistanceFromOrbitTarget * maxDistanceFromOrbitTarget;
+        detectCombatDistanceSquared = detectCombatDistance * detectCombatDistance;
+        exitWarpWhenCloseToOrbitTargetDistanceSquared = exitWarpWhenCloseToOrbitTargetDistance * exitWarpWhenCloseToOrbitTargetDistance;
+        enterWarpWhenFarFromOrbitTargetDistanceSquared = enterWarpWhenFarFromOrbitTargetDistance * enterWarpWhenFarFromOrbitTargetDistance;
+
         float currentAngle = MathUtils.random(0f, 360f);
         this.targetAngle = currentAngle;
         setRotation(currentAngle);
@@ -93,6 +113,9 @@ public class SpaceShip extends GameObject {
                 break;
             case FLYING_AROUND_TARGET:
             case FLYING_TO_TARGET:
+                if (combatTarget == null) {
+                    seekCombatTarget(deltaTime);
+                }
                 changeDirectionPeriodically(deltaTime);
         }
                 
@@ -110,7 +133,8 @@ public class SpaceShip extends GameObject {
         // note: let updatePostion handle the actual movement based on currentSpeed and rotation, we just need to set the rotation towards the direction we want to warp out in
         
         // Disappear after getting away from the planet or station
-        if (getDistanceTo(orbitTarget) > 2000f && warpTimer > 2f) {
+        Boolean farFromOrbitTarget = getDistanceToSquared(orbitTarget) > enterWarpWhenFarFromOrbitTargetDistanceSquared;
+        if (farFromOrbitTarget && warpTimer > 2f) {
             //System.out.println("Warp out ... ship disappeared");
             isVisible = false;
             // Schedule warp in after a delay
@@ -154,10 +178,27 @@ public class SpaceShip extends GameObject {
         //adjustCourseIfNeeded();
 
         // switch to normal flying if we are close to the planet or station
-        if (getDistanceTo(orbitTarget) < 1000f && warpTimer > 2f) {
+        Boolean closeToOrbitTarget = getDistanceToSquared(orbitTarget) < exitWarpWhenCloseToOrbitTargetDistanceSquared;
+        if (closeToOrbitTarget && warpTimer > 2f) {
             warpTimer = 0f;
             currentBehavior = Behavior.FLYING_AROUND_TARGET;
         }
+    }
+
+    private void seekCombatTarget(float deltaTime) {
+        seekCombatTargetTimer += deltaTime;
+        if (seekCombatTargetInterval > seekCombatTargetTimer) {
+            seekCombatTargetTimer = 0f;
+
+            combatTarget = getClosestShipWithinRange(detectCombatDistanceSquared);
+            if (combatTarget != null) {
+                System.out.println("found target " + combatTarget.getName());
+            }
+        }
+    }
+
+    private GameObject getClosestShipWithinRange(float range) {
+        return GameUtils.getClosestShipWithinRange(range, getX(), getY());
     }
 
     private void changeDirectionPeriodically(float deltaTime) {
@@ -182,11 +223,9 @@ public class SpaceShip extends GameObject {
     private void adjustCourseIfNeeded() {
         // Check distance to planet and station, adjust course if too far
         // this overrides the random direction changes, but only if we are too far from both objects
+        // todo - this needs a better way to determine maxDistanceFromOrbitTarget
         
-        float orbitTargetDistance = getDistanceTo(orbitTarget);
-        
-        // todo - this needs a better way to determine maxDistanceFromObjects
-        if (orbitTargetDistance > maxDistanceFromObjects) {
+        if (getDistanceToSquared(orbitTarget) > maxDistanceFromOrbitTargetSquared) {
             // Too far, turn towards nearest object
             float dx = orbitTarget.getX() - getX();
             float dy = orbitTarget.getY() - getY();
@@ -205,14 +244,20 @@ public class SpaceShip extends GameObject {
 
     private void updatePosition(float deltaTime) {
         // update previous position before moving. used for optimization, not for movement
-        prevX = getX();
-        prevY = getY();
+        //prevX = getX();
+        //prevY = getY();
 
         // Move in current direction
         float rad = (float) Math.toRadians(getRotation());
         float moveX = currentSpeed * (float) Math.cos(rad) * deltaTime;
         float moveY = currentSpeed * (float) Math.sin(rad) * deltaTime;
         
+        // TODO: ships never accelerate - they always travel at max speed!
+        //lastMovementSpeed = currentSpeed;
+        // I could just keep track of the last "currentSpeed" and use it for the optimization check
+        // instead of doing a distance check in updateRotation()
+        // if (lastMovementSpeed > 0.1f) {do movement ...}
+
         setX(getX() + moveX);
         setY(getY() + moveY);
     }
@@ -220,11 +265,12 @@ public class SpaceShip extends GameObject {
     private void updateRotation(float deltaTime) {
         // Calculate actual movement direction
         // why do we need previous x? it's used to avoid performing unnecessary computation
-        float moveDx = getX() - prevX;
-        float moveDy = getY() - prevY;
-        float moveDistance = (float) Math.sqrt(moveDx * moveDx + moveDy * moveDy);
+        //float moveDx = getX() - prevX;
+        //float moveDy = getY() - prevY;
+        // todo - don't optimize anything, it's pointless for now
+        float moveDistance = 1f; // (float) Math.sqrt(moveDx * moveDx + moveDy * moveDy);
         
-        if (moveDistance > 0.1f) {
+        if (true) { // moveDistance > 0.1f
             float _angle = targetAngle;
 
             // clip angle to 0-360 degrees
@@ -252,6 +298,12 @@ public class SpaceShip extends GameObject {
         float dx = getX() - target.getX();
         float dy = getY() - target.getY();
         return (float) Math.sqrt(dx * dx + dy * dy);
+    }
+
+    private float getDistanceToSquared(GameObject target) {
+        float dx = getX() - target.getX();
+        float dy = getY() - target.getY();
+        return dx * dx + dy * dy;
     }
 
     public void triggerWarpOut() {

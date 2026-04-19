@@ -82,11 +82,11 @@ public class GameWorld {
     
     private void initialize() {
         // Create planet (circle) - center-left of world
-        planet = new GameObject(GameObject.Type.PLANET, -WORLD_WIDTH * 0.5f, WORLD_HEIGHT * 0.5f, 40f, "Planet");
+        planet = new GameObject(GameObject.Type.PLANET, -WORLD_WIDTH * 0.25f, WORLD_HEIGHT * 0.5f, 40f, "Planet");
         gameObjects.add(planet);
         
         // Create space station (square) - center-right of world
-        spaceStation = new GameObject(GameObject.Type.SPACE_STATION, WORLD_WIDTH * 1.5f, WORLD_HEIGHT * 0.5f, 50f, "Space Station");
+        spaceStation = new GameObject(GameObject.Type.SPACE_STATION, WORLD_WIDTH * 1.25f, WORLD_HEIGHT * 0.5f, 50f, "Space Station");
         gameObjects.add(spaceStation);
 
         debugIndicator = new GameObject(GameObject.Type.DEBUG_INDICATOR, 0, 0, 10f, "Debug Indicator");
@@ -110,6 +110,7 @@ public class GameWorld {
             
             spaceShips.add(ship);
             gameObjects.add(ship);
+            GameUtils.addSpaceShip(ship);
         }
     }
     
