@@ -48,16 +48,30 @@ public class SpaceShip extends GameObject {
     private float seekCombatTargetTimer = 0f;
     private float seekCombatTargetInterval = 0.5f;
 
-    private float detectCombatDistance = 200f;
+    private float combatBulletSpeed = 280f;
+    private float combatAimToleranceDegrees = 6f;
+    private float projectileRadius = 2.5f;
+    private float projectileLifetime = 2f;
+    private float fireCooldown = 0f;
+    private float fireInterval = 0.35f;
+    private float velocityX = 0f;
+    private float velocityY = 0f;
+    private boolean linedUpForShot = false; // todo - use this to fire bullets when I add the projectile system
 
     private float maxDistanceFromOrbitTarget = 100f;
-
+    private float detectCombatDistance = 200f;
+    private float combatMinDistance = 120f;
+    private float combatMaxDistance = 240f;
+    private float combatFireRange = 260f;
     private float exitWarpWhenCloseToOrbitTargetDistance = 1000f;
     private float enterWarpWhenFarFromOrbitTargetDistance = 2000f;
 
     // don't manually set these squared values!
     private float maxDistanceFromOrbitTargetSquared;
     private float detectCombatDistanceSquared;
+    private float combatMinDistanceSquared;
+    private float combatMaxDistanceSquared;
+    private float combatFireRangeSquared;
     private float exitWarpWhenCloseToOrbitTargetDistanceSquared;
     private float enterWarpWhenFarFromOrbitTargetDistanceSquared;
 
@@ -90,6 +104,9 @@ public class SpaceShip extends GameObject {
         
         maxDistanceFromOrbitTargetSquared = maxDistanceFromOrbitTarget * maxDistanceFromOrbitTarget;
         detectCombatDistanceSquared = detectCombatDistance * detectCombatDistance;
+        combatMinDistanceSquared = combatMinDistance * combatMinDistance;
+        combatMaxDistanceSquared = combatMaxDistance * combatMaxDistance;
+        combatFireRangeSquared = combatFireRange * combatFireRange;
         exitWarpWhenCloseToOrbitTargetDistanceSquared = exitWarpWhenCloseToOrbitTargetDistance * exitWarpWhenCloseToOrbitTargetDistance;
         enterWarpWhenFarFromOrbitTargetDistanceSquared = enterWarpWhenFarFromOrbitTargetDistance * enterWarpWhenFarFromOrbitTargetDistance;
 
@@ -100,6 +117,11 @@ public class SpaceShip extends GameObject {
     
     @Override
     public void update(float deltaTime) {
+        update(deltaTime, null);
+    }
+
+    public void update(float deltaTime, ProjectileManager projectileManager) {
+        fireCooldown = Math.max(0f, fireCooldown - deltaTime);
 
         switch (currentBehavior) {
             case WARPING_OUT:
@@ -113,14 +135,41 @@ public class SpaceShip extends GameObject {
                 break;
             case FLYING_AROUND_TARGET:
             case FLYING_TO_TARGET:
-                if (combatTarget == null) {
-                    seekCombatTarget(deltaTime);
+                seekCombatTarget(deltaTime);
+                if (combatTarget != null) {
+                    updateCombatBehavior();
+                    tryFire(projectileManager);
+                } else {
+                    linedUpForShot = false;
+                    currentSpeed = maxNormalSpeed;
+                    changeDirectionPeriodically(deltaTime);
                 }
-                changeDirectionPeriodically(deltaTime);
         }
                 
         updateRotation(deltaTime);
         updatePosition(deltaTime);
+    }
+
+    private void tryFire(ProjectileManager projectileManager) {
+        if (projectileManager == null || !linedUpForShot || fireCooldown > 0f) {
+            return;
+        }
+
+        float rad = (float) Math.toRadians(getRotation());
+        float muzzleOffset = getSize() + projectileRadius + 2f;
+        float spawnX = getX() + (float) Math.cos(rad) * muzzleOffset;
+        float spawnY = getY() + (float) Math.sin(rad) * muzzleOffset;
+
+        projectileManager.spawn(
+            this,
+            spawnX,
+            spawnY,
+            getRotation(),
+            combatBulletSpeed,
+            projectileLifetime,
+            projectileRadius
+        );
+        fireCooldown = fireInterval;
     }
 
     private void warpOut(float deltaTime) {
@@ -187,7 +236,7 @@ public class SpaceShip extends GameObject {
 
     private void seekCombatTarget(float deltaTime) {
         seekCombatTargetTimer += deltaTime;
-        if (seekCombatTargetInterval > seekCombatTargetTimer) {
+        if (seekCombatTargetTimer >= seekCombatTargetInterval) {
             seekCombatTargetTimer = 0f;
 
             combatTarget = getClosestShipWithinRange(detectCombatDistanceSquared);
@@ -198,7 +247,45 @@ public class SpaceShip extends GameObject {
     }
 
     private GameObject getClosestShipWithinRange(float range) {
-        return GameUtils.getClosestShipWithinRange(range, getX(), getY());
+        return GameUtils.getClosestShipWithinRange(range, getX(), getY(), this);
+    }
+
+    private void updateCombatBehavior() {
+        if (combatTarget == null) {
+            linedUpForShot = false;
+            return;
+        }
+
+        float distanceToTargetSquared = getDistanceToSquared(combatTarget);
+        if (distanceToTargetSquared > detectCombatDistanceSquared) {
+            combatTarget = null;
+            linedUpForShot = false;
+            return;
+        }
+
+        float interceptX = combatTarget.getX();
+        float interceptY = combatTarget.getY();
+        if (combatTarget instanceof SpaceShip) {
+            SpaceShip targetShip = (SpaceShip) combatTarget;
+            float distanceToTarget = (float) Math.sqrt(distanceToTargetSquared);
+            float travelTime = distanceToTarget / combatBulletSpeed;
+            interceptX += targetShip.getVelocityX() * travelTime;
+            interceptY += targetShip.getVelocityY() * travelTime;
+        }
+
+        float desiredAngle = (float) Math.toDegrees(Math.atan2(interceptY - getY(), interceptX - getX()));
+        targetAngle = normalizeAngle(desiredAngle);
+
+        float angleDiff = Math.abs(getShortestAngleDifference(targetAngle, getRotation()));
+        linedUpForShot = angleDiff <= combatAimToleranceDegrees && distanceToTargetSquared <= combatFireRangeSquared;
+
+        if (distanceToTargetSquared > combatMaxDistanceSquared) {
+            currentSpeed = maxNormalSpeed;
+        } else if (distanceToTargetSquared < combatMinDistanceSquared) {
+            currentSpeed = -maxNormalSpeed * 0.5f;
+        } else {
+            currentSpeed = 0f;
+        }
     }
 
     private void changeDirectionPeriodically(float deltaTime) {
@@ -244,8 +331,8 @@ public class SpaceShip extends GameObject {
 
     private void updatePosition(float deltaTime) {
         // update previous position before moving. used for optimization, not for movement
-        //prevX = getX();
-        //prevY = getY();
+        prevX = getX();
+        prevY = getY();
 
         // Move in current direction
         float rad = (float) Math.toRadians(getRotation());
@@ -260,6 +347,11 @@ public class SpaceShip extends GameObject {
 
         setX(getX() + moveX);
         setY(getY() + moveY);
+
+        if (deltaTime > 0f) {
+            velocityX = (getX() - prevX) / deltaTime;
+            velocityY = (getY() - prevY) / deltaTime;
+        }
     }
 
     private void updateRotation(float deltaTime) {
@@ -267,37 +359,31 @@ public class SpaceShip extends GameObject {
         // why do we need previous x? it's used to avoid performing unnecessary computation
         //float moveDx = getX() - prevX;
         //float moveDy = getY() - prevY;
-        // todo - don't optimize anything, it's pointless for now
-        float moveDistance = 1f; // (float) Math.sqrt(moveDx * moveDx + moveDy * moveDy);
+        float _angle = normalizeAngle(targetAngle);
         
-        if (true) { // moveDistance > 0.1f
-            float _angle = targetAngle;
+        // difference between our target angle and our current rotation
+        float angleDiff = getShortestAngleDifference(_angle, getRotation());
+        
+        float rotationChange = angleDiff * 1f * deltaTime;
 
-            // clip angle to 0-360 degrees
-            _angle = _angle % 360f;
-            if (_angle < 0) _angle += 360f;
-            
-            // difference between our target angle and our current rotation
-            float angleDiff = _angle - getRotation();
-            
-            // clip angle difference to -180 to 180 degrees
-            if (angleDiff > 180f) angleDiff -= 360f;
-            if (angleDiff < -180f) angleDiff += 360f;
-            
-            float rotationChange = angleDiff * 1f * deltaTime;
+        // don't change the rotation more than a certain amount (clamp rotationChange)
+        // we want to lerp rotation over time
+        rotationChange = Math.clamp(rotationChange, -maneuverability, maneuverability);
 
-            // don't change the rotation more than a certain amount (clamp rotationChange)
-            // we want to lerp rotation over time
-            rotationChange = Math.clamp(rotationChange, -maneuverability, maneuverability);
-
-            setRotation(getRotation() + rotationChange);
-        }
+        setRotation(getRotation() + rotationChange);
     }
 
-    private float getDistanceTo(GameObject target) {
-        float dx = getX() - target.getX();
-        float dy = getY() - target.getY();
-        return (float) Math.sqrt(dx * dx + dy * dy);
+    private float getShortestAngleDifference(float target, float current) {
+        float angleDiff = target - current;
+        if (angleDiff > 180f) angleDiff -= 360f;
+        if (angleDiff < -180f) angleDiff += 360f;
+        return angleDiff;
+    }
+
+    private float normalizeAngle(float angle) {
+        float normalized = angle % 360f;
+        if (normalized < 0) normalized += 360f;
+        return normalized;
     }
 
     private float getDistanceToSquared(GameObject target) {
@@ -328,5 +414,17 @@ public class SpaceShip extends GameObject {
     
     public Cargo getCargo() {
         return cargo;
+    }
+
+    public float getVelocityX() {
+        return velocityX;
+    }
+
+    public float getVelocityY() {
+        return velocityY;
+    }
+
+    public boolean isLinedUpForShot() {
+        return linedUpForShot;
     }
 }

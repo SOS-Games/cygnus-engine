@@ -31,6 +31,7 @@ public class GameWorld {
     private ShipData playerShipData;
     private float playerShipRadius = 18f;
     private float npcShipMaxSpeed = 60f;
+    private ProjectileManager projectileManager;
     
     public GameWorld() {
         shapeRenderer = new ShapeRenderer();
@@ -41,6 +42,7 @@ public class GameWorld {
         
         gameObjects = new Array<>();
         spaceShips = new Array<>();
+        projectileManager = new ProjectileManager();
         warpTimer = 0f;
         warpInterval = 3f; // Warp every 10 seconds on average
 
@@ -117,8 +119,9 @@ public class GameWorld {
     public void update(float deltaTime) {
         // Update space ships (they handle their own behavior)
         for (SpaceShip ship : spaceShips) {
-            ship.update(deltaTime);
+            ship.update(deltaTime, projectileManager);
         }
+        projectileManager.update(deltaTime, spaceShips);
         
         // Update other game objects
         for (GameObject obj : gameObjects) {
@@ -188,6 +191,7 @@ public class GameWorld {
                     shapeRenderer.circle(obj.getX(), obj.getY(), obj.getSize());
             }
         }
+        projectileManager.render(shapeRenderer);
         
         shapeRenderer.end();
     }
