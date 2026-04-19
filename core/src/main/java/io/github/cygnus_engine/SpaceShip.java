@@ -36,22 +36,22 @@ import com.badlogic.gdx.math.MathUtils;
 
 
 public class SpaceShip extends GameObject {
-    private GameObject planet;
-    private GameObject spaceStation;
-    private float prevX, prevY;
+    private GameObject orbitTarget;
+    private float prevX, prevY = 0f;
     private float currentSpeed = 0f;
-    private float maxNormalSpeed;
-    private float targetAngle; // Desired direction in degrees
-    private float directionChangeTimer;
-    private float directionChangeInterval;
-    private float maxDistanceFromObjects;
+    private float maxNormalSpeed = 10f;
+    private float targetAngle = 0f; // Desired direction in degrees
+    private float directionChangeTimer = 0f;
+    private float directionChangeInterval = 2f;
+    private float maxDistanceFromObjects = 100f;
+    private float maneuverability = 1f; // limits maximum rotationChange per frame
 
     private Cargo cargo;
 
     private Behavior currentBehavior = Behavior.FLYING_AROUND_TARGET;
 
-    private float warpSpeed; // max warp speed
-    private float warpTimer; // Timer for warp effects
+    private float warpSpeed = 600f; // max warp speed
+    private float warpTimer = 0f; // Timer for warp effects
     private boolean isVisible = true;
     
     public enum Behavior {
@@ -63,23 +63,16 @@ public class SpaceShip extends GameObject {
     }
 
     public SpaceShip(float x, float y, float size, String name,
-                           GameObject planet, GameObject spaceStation, float configuredMaxSpeed) {
+                           GameObject orbitTarget, float configuredMaxSpeed) {
         super(Type.SPACE_SHIP, x, y, size, name);
-        this.planet = planet;
-        this.spaceStation = spaceStation;
+        this.orbitTarget = orbitTarget;
         this.prevX = x;
         this.prevY = y;
         this.maxNormalSpeed = configuredMaxSpeed;
         this.currentSpeed = maxNormalSpeed;
-        this.directionChangeTimer = 0f;
-        this.directionChangeInterval = 2f;
-        this.maxDistanceFromObjects = 300f;
 
         this.cargo = new Cargo(true);
         
-        this.warpSpeed = 600f;
-        this.warpTimer = 0f;
-
         float currentAngle = MathUtils.random(0f, 360f);
         this.targetAngle = currentAngle;
         setRotation(currentAngle);
@@ -117,7 +110,7 @@ public class SpaceShip extends GameObject {
         // note: let updatePostion handle the actual movement based on currentSpeed and rotation, we just need to set the rotation towards the direction we want to warp out in
         
         // Disappear after getting away from the planet or station
-        if ((getDistanceTo(planet) > 2000f || getDistanceTo(spaceStation) > 2000f) && warpTimer > 2f) {
+        if (getDistanceTo(orbitTarget) > 2000f && warpTimer > 2f) {
             //System.out.println("Warp out ... ship disappeared");
             isVisible = false;
             // Schedule warp in after a delay
@@ -142,8 +135,8 @@ public class SpaceShip extends GameObject {
             float dx = 1000f * (float) Math.cos(rad);
             float dy = 1000f * (float) Math.sin(rad);
 
-            setX(planet.getX() - dx);
-            setY(planet.getY() - dy);
+            setX(orbitTarget.getX() - dx);
+            setY(orbitTarget.getY() - dy);
         }
     }
 
@@ -161,7 +154,7 @@ public class SpaceShip extends GameObject {
         //adjustCourseIfNeeded();
 
         // switch to normal flying if we are close to the planet or station
-        if ((getDistanceTo(planet) < 1000f || getDistanceTo(spaceStation) < 1000f) && warpTimer > 2f) {
+        if (getDistanceTo(orbitTarget) < 1000f && warpTimer > 2f) {
             warpTimer = 0f;
             currentBehavior = Behavior.FLYING_AROUND_TARGET;
         }
@@ -190,15 +183,13 @@ public class SpaceShip extends GameObject {
         // Check distance to planet and station, adjust course if too far
         // this overrides the random direction changes, but only if we are too far from both objects
         
-        float distToPlanet = getDistanceTo(planet);
-        float distToStation = getDistanceTo(spaceStation);
-        float closestObjectDistance = Math.min(distToPlanet, distToStation);
+        float orbitTargetDistance = getDistanceTo(orbitTarget);
         
-        if (closestObjectDistance > maxDistanceFromObjects) {
+        // todo - this needs a better way to determine maxDistanceFromObjects
+        if (orbitTargetDistance > maxDistanceFromObjects) {
             // Too far, turn towards nearest object
-            GameObject nearest = (distToPlanet < distToStation) ? planet : spaceStation;
-            float dx = nearest.getX() - getX();
-            float dy = nearest.getY() - getY();
+            float dx = orbitTarget.getX() - getX();
+            float dy = orbitTarget.getY() - getY();
             float angleToClosest = (float) Math.toDegrees(Math.atan2(dy, dx));
             
             float _angle = getRotation();
@@ -213,7 +204,7 @@ public class SpaceShip extends GameObject {
     }
 
     private void updatePosition(float deltaTime) {
-        // update previous position before moving
+        // update previous position before moving. used for optimization, not for movement
         prevX = getX();
         prevY = getY();
 
@@ -228,6 +219,7 @@ public class SpaceShip extends GameObject {
 
     private void updateRotation(float deltaTime) {
         // Calculate actual movement direction
+        // why do we need previous x? it's used to avoid performing unnecessary computation
         float moveDx = getX() - prevX;
         float moveDy = getY() - prevY;
         float moveDistance = (float) Math.sqrt(moveDx * moveDx + moveDy * moveDy);
@@ -239,6 +231,7 @@ public class SpaceShip extends GameObject {
             _angle = _angle % 360f;
             if (_angle < 0) _angle += 360f;
             
+            // difference between our target angle and our current rotation
             float angleDiff = _angle - getRotation();
             
             // clip angle difference to -180 to 180 degrees
@@ -246,6 +239,11 @@ public class SpaceShip extends GameObject {
             if (angleDiff < -180f) angleDiff += 360f;
             
             float rotationChange = angleDiff * 1f * deltaTime;
+
+            // don't change the rotation more than a certain amount (clamp rotationChange)
+            // we want to lerp rotation over time
+            rotationChange = Math.clamp(rotationChange, -maneuverability, maneuverability);
+
             setRotation(getRotation() + rotationChange);
         }
     }
