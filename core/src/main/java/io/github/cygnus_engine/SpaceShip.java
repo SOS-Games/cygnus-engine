@@ -44,11 +44,11 @@ public class SpaceShip extends GameObject {
     private float targetAngle = 0f; // Desired direction in degrees
     private float directionChangeTimer = 0f;
     private float directionChangeInterval = 2f;
-    private float maneuverability = 1f; // limits maximum rotationChange per frame
+    private float maneuverability = 100f; // limits maximum rotationChange per frame
     private float seekCombatTargetTimer = 0f;
     private float seekCombatTargetInterval = 0.5f;
 
-    private float combatBulletSpeed = 280f;
+    private float bulletSpeed = 280f;
     private float combatAimToleranceDegrees = 6f;
     private float projectileRadius = 2.5f;
     private float projectileLifetime = 2f;
@@ -62,7 +62,7 @@ public class SpaceShip extends GameObject {
     private float detectCombatDistance = 200f;
     private float combatMinDistance = 120f;
     private float combatMaxDistance = 240f;
-    private float combatFireRange = 260f;
+    private float combatFireRange = 200f;
     private float exitWarpWhenCloseToOrbitTargetDistance = 1000f;
     private float enterWarpWhenFarFromOrbitTargetDistance = 2000f;
 
@@ -102,13 +102,13 @@ public class SpaceShip extends GameObject {
 
         this.cargo = new Cargo(true);
         
-        maxDistanceFromOrbitTargetSquared = maxDistanceFromOrbitTarget * maxDistanceFromOrbitTarget;
-        detectCombatDistanceSquared = detectCombatDistance * detectCombatDistance;
-        combatMinDistanceSquared = combatMinDistance * combatMinDistance;
-        combatMaxDistanceSquared = combatMaxDistance * combatMaxDistance;
-        combatFireRangeSquared = combatFireRange * combatFireRange;
-        exitWarpWhenCloseToOrbitTargetDistanceSquared = exitWarpWhenCloseToOrbitTargetDistance * exitWarpWhenCloseToOrbitTargetDistance;
-        enterWarpWhenFarFromOrbitTargetDistanceSquared = enterWarpWhenFarFromOrbitTargetDistance * enterWarpWhenFarFromOrbitTargetDistance;
+        maxDistanceFromOrbitTargetSquared = (float) Math.pow(maxDistanceFromOrbitTarget, 2);
+        detectCombatDistanceSquared = (float) Math.pow(detectCombatDistance, 2);
+        combatMinDistanceSquared = (float) Math.pow(combatMinDistance, 2);
+        combatMaxDistanceSquared = (float) Math.pow(combatMaxDistance, 2);
+        combatFireRangeSquared = (float) Math.pow(combatFireRange, 2);
+        exitWarpWhenCloseToOrbitTargetDistanceSquared = (float) Math.pow(exitWarpWhenCloseToOrbitTargetDistance, 2);
+        enterWarpWhenFarFromOrbitTargetDistanceSquared = (float) Math.pow(enterWarpWhenFarFromOrbitTargetDistance, 2);
 
         float currentAngle = MathUtils.random(0f, 360f);
         this.targetAngle = currentAngle;
@@ -165,7 +165,7 @@ public class SpaceShip extends GameObject {
             spawnX,
             spawnY,
             getRotation(),
-            combatBulletSpeed,
+            bulletSpeed,
             projectileLifetime,
             projectileRadius
         );
@@ -263,20 +263,23 @@ public class SpaceShip extends GameObject {
             return;
         }
 
-        float interceptX = combatTarget.getX();
-        float interceptY = combatTarget.getY();
+        float bulletInterceptX = combatTarget.getX();
+        float bulletInterceptY = combatTarget.getY();
+
         if (combatTarget instanceof SpaceShip) {
             SpaceShip targetShip = (SpaceShip) combatTarget;
+
             float distanceToTarget = (float) Math.sqrt(distanceToTargetSquared);
-            float travelTime = distanceToTarget / combatBulletSpeed;
-            interceptX += targetShip.getVelocityX() * travelTime;
-            interceptY += targetShip.getVelocityY() * travelTime;
+            float bulletTravelTime = distanceToTarget / bulletSpeed;
+
+            bulletInterceptX += targetShip.getVelocityX() * bulletTravelTime;
+            bulletInterceptY += targetShip.getVelocityY() * bulletTravelTime;
         }
 
-        float desiredAngle = (float) Math.toDegrees(Math.atan2(interceptY - getY(), interceptX - getX()));
+        float desiredAngle = getAngleToObject(bulletInterceptX, bulletInterceptY);
         targetAngle = normalizeAngle(desiredAngle);
 
-        float angleDiff = Math.abs(getShortestAngleDifference(targetAngle, getRotation()));
+        float angleDiff = Math.abs(getAngleDifference(targetAngle, getRotation()));
         linedUpForShot = angleDiff <= combatAimToleranceDegrees && distanceToTargetSquared <= combatFireRangeSquared;
 
         if (distanceToTargetSquared > combatMaxDistanceSquared) {
@@ -310,23 +313,25 @@ public class SpaceShip extends GameObject {
     private void adjustCourseIfNeeded() {
         // Check distance to planet and station, adjust course if too far
         // this overrides the random direction changes, but only if we are too far from both objects
-        // todo - this needs a better way to determine maxDistanceFromOrbitTarget
+
+        // todo - this needs a better way to determine if we are too far away
         
         if (getDistanceToSquared(orbitTarget) > maxDistanceFromOrbitTargetSquared) {
             // Too far, turn towards nearest object
-            float dx = orbitTarget.getX() - getX();
-            float dy = orbitTarget.getY() - getY();
-            float angleToClosest = (float) Math.toDegrees(Math.atan2(dy, dx));
-            
-            float _angle = getRotation();
-
             // set target angle directly towards the object
-            _angle = angleToClosest;
-            _angle = _angle % 360f;
-            if (_angle < 0) _angle += 360f;
+            float angleToClosest = getAngleToObject(orbitTarget.getX(), orbitTarget.getY());
+            
+            angleToClosest = normalizeAngle(angleToClosest);
 
-            targetAngle = _angle;
+            targetAngle = angleToClosest;
         }
+    }
+
+    private float getAngleToObject(float objectX, float objectY) {
+        float dx = objectX - getX();
+        float dy = objectY - getY();
+        float angleToObject = (float) Math.toDegrees(Math.atan2(dy, dx));
+        return angleToObject;
     }
 
     private void updatePosition(float deltaTime) {
@@ -355,32 +360,38 @@ public class SpaceShip extends GameObject {
     }
 
     private void updateRotation(float deltaTime) {
-        // Calculate actual movement direction
-        // why do we need previous x? it's used to avoid performing unnecessary computation
-        //float moveDx = getX() - prevX;
-        //float moveDy = getY() - prevY;
-        float _angle = normalizeAngle(targetAngle);
+        targetAngle = normalizeAngle(targetAngle);
         
-        // difference between our target angle and our current rotation
-        float angleDiff = getShortestAngleDifference(_angle, getRotation());
-        
-        float rotationChange = angleDiff * 1f * deltaTime;
+        float currentRotation = getRotation();
 
-        // don't change the rotation more than a certain amount (clamp rotationChange)
-        // we want to lerp rotation over time
-        rotationChange = Math.clamp(rotationChange, -maneuverability, maneuverability);
+        float angleDiff = getAngleDifference(targetAngle, currentRotation);
 
-        setRotation(getRotation() + rotationChange);
+        // Calculate the maximum amount we CAN rotate this frame
+        float maxRotationThisFrame = maneuverability * deltaTime;
+
+        // Check if we are already close enough to "snap" 
+        if (Math.abs(angleDiff) <= maxRotationThisFrame) {
+            // This prevents the ship from vibrating back and forth over the target line
+            setRotation(targetAngle);
+        } else {
+            // Otherwise, rotate at FULL speed in the correct direction
+            float direction = Math.signum(angleDiff);
+            setRotation(currentRotation + (direction * maxRotationThisFrame));
+        }
     }
 
-    private float getShortestAngleDifference(float target, float current) {
+    private float getAngleDifference(float target, float current) {
         float angleDiff = target - current;
+
+        // limit angle from -180 to 180
         if (angleDiff > 180f) angleDiff -= 360f;
         if (angleDiff < -180f) angleDiff += 360f;
+
         return angleDiff;
     }
 
     private float normalizeAngle(float angle) {
+        // limit angle from 0 to 360
         float normalized = angle % 360f;
         if (normalized < 0) normalized += 360f;
         return normalized;
