@@ -40,16 +40,20 @@ public class SpaceShip extends GameObject {
     private GameObject combatTarget = null;
     private float prevX, prevY = 0f;
     private float currentSpeed = 0f;
+    private float strafeSpeed = 0f;
     private float maxNormalSpeed = 10f;
     private float targetAngle = 0f; // Desired direction in degrees
     private float directionChangeTimer = 0f;
     private float directionChangeInterval = 2f;
-    private float maneuverability = 100f; // limits maximum rotationChange per frame
+    private float maneuverability = 200f; // limits maximum rotationChange per frame
     private float seekCombatTargetTimer = 0f;
     private float seekCombatTargetInterval = 0.5f;
+    private float dodgeTimer = 0f;
+    private float dodgeDirection = 1f;
+    private float dodgeInterval = 1.5f;
 
     private float bulletSpeed = 280f;
-    private float combatAimToleranceDegrees = 6f;
+    private float combatAimToleranceDegrees = 12f;
     private float projectileRadius = 2.5f;
     private float projectileLifetime = 2f;
     private float fireCooldown = 0f;
@@ -60,9 +64,9 @@ public class SpaceShip extends GameObject {
 
     private float maxDistanceFromOrbitTarget = 100f;
     private float detectCombatDistance = 200f;
-    private float combatMinDistance = 120f;
-    private float combatMaxDistance = 240f;
-    private float combatFireRange = 200f;
+    private float combatMinDistance = 100f;
+    private float combatMaxDistance = 300f;
+    private float combatFireRange = 260f;
     private float exitWarpWhenCloseToOrbitTargetDistance = 1000f;
     private float enterWarpWhenFarFromOrbitTargetDistance = 2000f;
 
@@ -137,11 +141,12 @@ public class SpaceShip extends GameObject {
             case FLYING_TO_TARGET:
                 seekCombatTarget(deltaTime);
                 if (combatTarget != null) {
-                    updateCombatBehavior();
+                    updateCombatBehavior(deltaTime);
                     tryFire(projectileManager);
                 } else {
                     linedUpForShot = false;
                     currentSpeed = maxNormalSpeed;
+                    strafeSpeed = 0f;
                     changeDirectionPeriodically(deltaTime);
                 }
         }
@@ -250,9 +255,10 @@ public class SpaceShip extends GameObject {
         return GameUtils.getClosestShipWithinRange(range, getX(), getY(), this);
     }
 
-    private void updateCombatBehavior() {
+    private void updateCombatBehavior(float deltaTime) {
         if (combatTarget == null) {
             linedUpForShot = false;
+            strafeSpeed = 0f;
             return;
         }
 
@@ -260,6 +266,7 @@ public class SpaceShip extends GameObject {
         if (distanceToTargetSquared > detectCombatDistanceSquared) {
             combatTarget = null;
             linedUpForShot = false;
+            strafeSpeed = 0f;
             return;
         }
 
@@ -285,9 +292,18 @@ public class SpaceShip extends GameObject {
         if (distanceToTargetSquared > combatMaxDistanceSquared) {
             currentSpeed = maxNormalSpeed;
         } else if (distanceToTargetSquared < combatMinDistanceSquared) {
-            currentSpeed = -maxNormalSpeed * 0.5f;
+            currentSpeed = -maxNormalSpeed * 0.4f;
         } else {
-            currentSpeed = 0f;
+            // Keep slight forward drift so ships do not "freeze" at ideal range.
+            currentSpeed = maxNormalSpeed * 0.005f;
+        }
+
+        dodgeTimer -= deltaTime;
+        if (dodgeTimer <= 0f) {
+            dodgeDirection = MathUtils.randomBoolean() ? 1f : -1f;
+            float dodgeStrength = 0.4f;
+            strafeSpeed = maxNormalSpeed * dodgeStrength * dodgeDirection;
+            dodgeTimer = MathUtils.random(0.4f, dodgeInterval);
         }
     }
 
@@ -341,8 +357,15 @@ public class SpaceShip extends GameObject {
 
         // Move in current direction
         float rad = (float) Math.toRadians(getRotation());
-        float moveX = currentSpeed * (float) Math.cos(rad) * deltaTime;
-        float moveY = currentSpeed * (float) Math.sin(rad) * deltaTime;
+        float forwardX = currentSpeed * (float) Math.cos(rad);
+        float forwardY = currentSpeed * (float) Math.sin(rad);
+
+        float strafeRad = rad + MathUtils.HALF_PI;
+        float lateralX = strafeSpeed * (float) Math.cos(strafeRad);
+        float lateralY = strafeSpeed * (float) Math.sin(strafeRad);
+
+        float moveX = (forwardX + lateralX) * deltaTime;
+        float moveY = (forwardY + lateralY) * deltaTime;
         
         // TODO: ships never accelerate - they always travel at max speed!
         //lastMovementSpeed = currentSpeed;
