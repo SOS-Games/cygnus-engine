@@ -1,0 +1,48 @@
+{
+  "id": "frigate",
+  "name": "Patrol Frigate",
+  "texturePath": "mods/core/fighter.png",
+  "speed": 72,
+  "maneuverability": 2,
+  "cargoSpace": 8,
+  "combatProfile": "FRIGATE",
+  "orbitCombatRadius": 215,
+  "orbitCombatBand": 48,
+  "hullTurnDegPerSec": 68,
+  "bounds": {
+    "x": -18,
+    "y": -22,
+    "width": 36,
+    "height": 44
+  },
+  "colliderVertices": [
+    { "x": 10, "y": 18 },
+    { "x": 14, "y": -8 },
+    { "x": 0, "y": -20 },
+    { "x": -14, "y": -8 },
+    { "x": -10, "y": 18 }
+  ],
+  "weaponSlots": [
+    {
+      "id": "top_turret",
+      "x": 0,
+      "y": 10,
+      "type": "TURRET",
+      "equippedWeaponId": "burst_laser"
+    },
+    {
+      "id": "port_tube",
+      "x": -12,
+      "y": -4,
+      "type": "HARDPOINT",
+      "equippedWeaponId": "homing_needle"
+    },
+    {
+      "id": "starboard_tube",
+      "x": 12,
+      "y": -4,
+      "type": "HARDPOINT",
+      "equippedWeaponId": "homing_needle"
+    }
+  ]
+}

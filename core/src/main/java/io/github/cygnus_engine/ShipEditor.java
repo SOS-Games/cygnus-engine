@@ -14,8 +14,7 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.utils.viewport.FitViewport;
-import com.badlogic.gdx.utils.viewport.Viewport;
+import com.badlogic.gdx.utils.ObjectMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,9 +51,13 @@ public class ShipEditor {
     private boolean insertModeEnabled = true;
     private final Vector2 hoveredMouseRel = new Vector2();
     private Vector2 hoveredPoint = null;
+    private WeaponSlot hoveredWeaponSlot = null;
     private int hoveredColliderEdgeIndex = -1;
     private final Vector2 hoveredInsertPoint = new Vector2();
     private final Map<Vector2, Vector2> colliderMirrorPairs = new IdentityHashMap<>();
+    private final Map<WeaponSlot, WeaponSlot> weaponMirrorPairs = new IdentityHashMap<>();
+    private WeaponSlot selectedWeaponSlot;
+    private final ObjectMap<String, Texture> weaponPreviewTextures = new ObjectMap<>();
 
     private enum CornerHandle { NONE, BL, BR, TL, TR }
     private enum PointOwner { NONE, COM, WEAPON, ENGINE, COLLIDER }
@@ -66,27 +69,29 @@ public class ShipEditor {
 
             Vector2 mouseRel = screenToShipRelative(screenX, screenY);
 
-            System.out.println("touchDown at " + mouseRel.x + ", " + mouseRel.y);
-
             // 1) Corner handles for bounds
             CornerHandle corner = pickBoundsCorner(mouseRel);
             if (corner != CornerHandle.NONE) {
+                selectedWeaponSlot = null;
                 selectedCorner = corner;
                 return true;
             }
 
             // 2) Points: weapon slots
-            for (Vector2 slot : shipData.weaponSlots) {
-                if (mouseRel.dst(slot) <= HANDLE_RADIUS) {
-                    selectedPoint = slot;
+            for (WeaponSlot slot : shipData.weaponSlots) {
+                if (mouseRel.dst(slot.x, slot.y) <= HANDLE_RADIUS) {
+                    selectedWeaponSlot = slot;
+                    selectedPoint = null;
                     selectedPointOwner = PointOwner.WEAPON;
                     return true;
                 }
             }
+            selectedWeaponSlot = null;
 
             // 3) Points: engines
             for (Vector2 pos : shipData.enginePositions) {
                 if (mouseRel.dst(pos) <= HANDLE_RADIUS) {
+                    selectedWeaponSlot = null;
                     selectedPoint = pos;
                     selectedPointOwner = PointOwner.ENGINE;
                     return true;
@@ -96,6 +101,7 @@ public class ShipEditor {
             // 4) Points: collider vertices
             for (Vector2 v : shipData.colliderVertices) {
                 if (mouseRel.dst(v) <= HANDLE_RADIUS) {
+                    selectedWeaponSlot = null;
                     selectedPoint = v;
                     selectedPointOwner = PointOwner.COLLIDER;
                     return true;
@@ -104,6 +110,7 @@ public class ShipEditor {
 
             // 5) Center of mass
             if (mouseRel.dst(shipData.centerOfMass) <= HANDLE_RADIUS) {
+                selectedWeaponSlot = null;
                 selectedPoint = shipData.centerOfMass;
                 selectedPointOwner = PointOwner.COM;
                 return true;
@@ -111,9 +118,11 @@ public class ShipEditor {
 
             // 6) Insert into collider edge in insert mode.
             if (insertModeEnabled && tryInsertColliderVertex(mouseRel)) {
+                selectedWeaponSlot = null;
                 return true;
             }
 
+            selectedWeaponSlot = null;
             return false;
         }
 
@@ -121,16 +130,29 @@ public class ShipEditor {
         public boolean touchDragged(int screenX, int screenY, int pointer) {
             if (shipData == null) return false;
 
-            if (selectedPoint == null && selectedCorner == CornerHandle.NONE) return false;
+            boolean draggingWeapon = selectedWeaponSlot != null && selectedPointOwner == PointOwner.WEAPON;
+            if (selectedCorner == CornerHandle.NONE && selectedPoint == null && !draggingWeapon) return false;
 
             Vector2 mouseRel = screenToShipRelative(screenX, screenY);
             snap(mouseRel);
+
+            if (selectedPointOwner == PointOwner.WEAPON && selectedWeaponSlot != null) {
+                selectedWeaponSlot.x = mouseRel.x;
+                selectedWeaponSlot.y = mouseRel.y;
+                if (symmetryEnabled) {
+                    WeaponSlot mirror = weaponMirrorPairs.get(selectedWeaponSlot);
+                    if (mirror != null) {
+                        mirror.x = -selectedWeaponSlot.x;
+                        mirror.y = selectedWeaponSlot.y;
+                    }
+                }
+                return true;
+            }
 
             if (selectedPoint != null) {
                 selectedPoint.set(mouseRel);
                 if (symmetryEnabled && selectedPointOwner != PointOwner.COM) {
                     List<Vector2> ownerList = switch (selectedPointOwner) {
-                        case WEAPON -> shipData.weaponSlots;
                         case ENGINE -> shipData.enginePositions;
                         case COLLIDER -> shipData.colliderVertices;
                         default -> null;
@@ -215,6 +237,8 @@ public class ShipEditor {
         shipSprite.setPosition(shipCenterWorld.x - w / 2f, shipCenterWorld.y - h / 2f);
         shipSprite.draw(spriteBatch);
 
+        drawWeaponSlotPreviews(spriteBatch);
+
         spriteBatch.end();
 
         drawOverlays();
@@ -245,6 +269,7 @@ public class ShipEditor {
 
     public void dispose() {
         if (shipTexture != null) shipTexture.dispose();
+        clearWeaponPreviewTextures();
         if (spriteBatch != null) spriteBatch.dispose();
         if (shapeRenderer != null) shapeRenderer.dispose();
     }
@@ -267,6 +292,7 @@ public class ShipEditor {
         }
 
         this.shipTextureFile = textureFile;
+        clearWeaponPreviewTextures();
         this.shipData = ShipDataIO.loadOrCreateDefault(textureFile);
 
         if (shipTexture != null) shipTexture.dispose();
@@ -275,13 +301,39 @@ public class ShipEditor {
         shipSprite = new Sprite(shipTexture);
         ensureDefaultCollider();
         rebuildColliderMirrorPairs();
+        rebuildWeaponMirrorPairs();
 
         Gdx.app.log("ShipEditor", "Loaded ship texture: " + textureFile.path());
     }
 
+    public WeaponSlot getSelectedWeaponSlot() {
+        return selectedWeaponSlot;
+    }
+
+    public void setSelectedWeaponSlotType(WeaponSlot.SlotType type) {
+        if (selectedWeaponSlot != null && type != null) {
+            selectedWeaponSlot.type = type;
+        }
+    }
+
+    public void setSelectedWeaponEquippedId(String weaponId) {
+        if (selectedWeaponSlot != null) {
+            selectedWeaponSlot.equippedWeaponId = weaponId == null || weaponId.isBlank() ? null : weaponId;
+        }
+    }
+
     public void addWeaponSlot() {
         if (shipData == null) return;
-        addPointWithOptionalMirror(shipData.weaponSlots, new Vector2(0, 0));
+        int n = shipData.weaponSlots.size();
+        WeaponSlot primary = new WeaponSlot("slot_" + n, 0f, 0f, WeaponSlot.SlotType.TURRET);
+        shipData.weaponSlots.add(primary);
+        if (symmetryEnabled) {
+            WeaponSlot mirror = new WeaponSlot("slot_" + (n + 1), 0f, 0f, WeaponSlot.SlotType.TURRET);
+            shipData.weaponSlots.add(mirror);
+            weaponMirrorPairs.put(primary, mirror);
+            weaponMirrorPairs.put(mirror, primary);
+        }
+        shipData.normalizeWeaponSlots();
     }
 
     public void addEnginePosition() {
@@ -477,9 +529,10 @@ public class ShipEditor {
 
         float pointSearchRadius = HANDLE_RADIUS * Math.max(1f, camera.zoom);
 
-        for (Vector2 slot : shipData.weaponSlots) {
-            if (mouseRel.dst(slot) <= pointSearchRadius) {
-                hoveredPoint = slot;
+        hoveredWeaponSlot = null;
+        for (WeaponSlot slot : shipData.weaponSlots) {
+            if (mouseRel.dst(slot.x, slot.y) <= pointSearchRadius) {
+                hoveredWeaponSlot = slot;
                 return;
             }
         }
@@ -565,8 +618,12 @@ public class ShipEditor {
         float circleRadius = 4f * camera.zoom;
 
         // Weapon slots
-        shapeRenderer.setColor(Color.RED);
-        for (Vector2 slot : shipData.weaponSlots) {
+        for (WeaponSlot slot : shipData.weaponSlots) {
+            if (slot.type == WeaponSlot.SlotType.HARDPOINT) {
+                shapeRenderer.setColor(Color.MAGENTA);
+            } else {
+                shapeRenderer.setColor(Color.RED);
+            }
             shapeRenderer.circle(shipCenterWorld.x + slot.x, shipCenterWorld.y + slot.y, circleRadius);
         }
 
@@ -594,7 +651,15 @@ public class ShipEditor {
         shapeRenderer.circle(shipCenterWorld.x + b.x + b.width, shipCenterWorld.y + b.y + b.height, circleRadius);
 
         // Hover state + insert ghost indicator.
-        if (hoveredPoint != null) {
+        if (hoveredWeaponSlot != null) {
+            shapeRenderer.setColor(Color.YELLOW);
+            float hoverRadius = circleRadius * 1.6f;
+            shapeRenderer.circle(
+                shipCenterWorld.x + hoveredWeaponSlot.x,
+                shipCenterWorld.y + hoveredWeaponSlot.y,
+                hoverRadius
+            );
+        } else if (hoveredPoint != null) {
             shapeRenderer.setColor(Color.YELLOW);
             float hoverRadius = circleRadius * 1.6f;
             shapeRenderer.circle(shipCenterWorld.x + hoveredPoint.x, shipCenterWorld.y + hoveredPoint.y, hoverRadius);
@@ -608,5 +673,74 @@ public class ShipEditor {
         }
 
         shapeRenderer.end();
+    }
+
+    private void rebuildWeaponMirrorPairs() {
+        weaponMirrorPairs.clear();
+        if (shipData == null) return;
+        List<WeaponSlot> slots = shipData.weaponSlots;
+        for (int i = 0; i < slots.size(); i++) {
+            WeaponSlot a = slots.get(i);
+            if (weaponMirrorPairs.containsKey(a)) continue;
+            for (int j = i + 1; j < slots.size(); j++) {
+                WeaponSlot b = slots.get(j);
+                if (MathUtils.isEqual(a.x, -b.x, 0.75f) && MathUtils.isEqual(a.y, b.y, 0.75f)) {
+                    weaponMirrorPairs.put(a, b);
+                    weaponMirrorPairs.put(b, a);
+                    break;
+                }
+            }
+        }
+    }
+
+    private void drawWeaponSlotPreviews(SpriteBatch batch) {
+        if (shipData == null) return;
+        for (WeaponSlot slot : shipData.weaponSlots) {
+            if (slot.equippedWeaponId == null || slot.equippedWeaponId.isBlank()) continue;
+            WeaponData wd = WeaponDataIO.loadById(slot.equippedWeaponId);
+            if (wd == null || wd.turretSprite == null || wd.turretSprite.isBlank()) continue;
+            Texture tex = obtainPreviewTexture(wd.turretSprite);
+            if (tex == null) continue;
+            float w = tex.getWidth();
+            float h = tex.getHeight();
+            float wx = shipCenterWorld.x + slot.x;
+            float wy = shipCenterWorld.y + slot.y;
+            batch.draw(
+                tex,
+                wx - w / 2f,
+                wy - h / 2f,
+                w / 2f,
+                h / 2f,
+                w,
+                h,
+                0.35f,
+                0.35f,
+                0f,
+                0,
+                0,
+                tex.getWidth(),
+                tex.getHeight(),
+                false,
+                false
+            );
+        }
+    }
+
+    private Texture obtainPreviewTexture(String path) {
+        Texture cached = weaponPreviewTextures.get(path);
+        if (cached != null) return cached;
+        FileHandle fh = WeaponDataIO.resolveTextureFile(path);
+        if (fh == null || !fh.exists()) return null;
+        Texture tex = new Texture(fh);
+        tex.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        weaponPreviewTextures.put(path, tex);
+        return tex;
+    }
+
+    private void clearWeaponPreviewTextures() {
+        for (Texture t : weaponPreviewTextures.values()) {
+            if (t != null) t.dispose();
+        }
+        weaponPreviewTextures.clear();
     }
 }

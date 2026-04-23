@@ -5,6 +5,7 @@ import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.ui.Dialog;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
@@ -13,6 +14,8 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.ui.Window;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
+
+import java.util.List;
 
 public class ModdingScreen {
     public interface ScreenListener {
@@ -36,6 +39,9 @@ public class ModdingScreen {
     private TextField cargoField;
     private TextButton symmetryButton;
     private TextButton insertModeButton;
+    private Label mountEditorInfoLabel;
+    private TextButton slotTypeToggleButton;
+    private TextButton equipWeaponButton;
 
     public ModdingScreen(Stage stage, Skin skin, ScreenListener listener) {
         this.stage = stage;
@@ -190,6 +196,28 @@ public class ModdingScreen {
             }
         });
 
+        slotTypeToggleButton = new TextButton("Slot type: —", skin);
+        slotTypeToggleButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                WeaponSlot s = shipEditor.getSelectedWeaponSlot();
+                if (s == null) return;
+                WeaponSlot.SlotType next = s.type == WeaponSlot.SlotType.TURRET
+                    ? WeaponSlot.SlotType.HARDPOINT
+                    : WeaponSlot.SlotType.TURRET;
+                shipEditor.setSelectedWeaponSlotType(next);
+                refreshMountEditorLabels();
+            }
+        });
+
+        equipWeaponButton = new TextButton("Equip weapon…", skin);
+        equipWeaponButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                openEquipWeaponDialog();
+            }
+        });
+
         TextButton addEngineButton = new TextButton("Add Engine Pos", skin);
         addEngineButton.addListener(new ChangeListener() {
             @Override
@@ -236,6 +264,8 @@ public class ModdingScreen {
 
         editorWindow.add(backButton).left();
         editorWindow.add(addWeaponButton);
+        editorWindow.add(slotTypeToggleButton);
+        editorWindow.add(equipWeaponButton);
         editorWindow.add(addEngineButton);
         editorWindow.add(addColliderButton);
         editorWindow.add(insertModeButton);
@@ -257,7 +287,14 @@ public class ModdingScreen {
         fields.add(cargoField).width(120f).row();
 
         editorWindow.add(fields).left().row();
-        editorWindow.add(new Label("Drag points directly. Hovered points are yellow. Insert mode: click white-highlighted collider edges to add vertices.", skin)).left().row();
+
+        mountEditorInfoLabel = new Label("", skin);
+        mountEditorInfoLabel.setWrap(true);
+        refreshMountEditorLabels();
+        editorWindow.add(mountEditorInfoLabel).left().width(720f).row();
+
+        editorWindow.add(new Label("Mounts: red = turret, magenta = hardpoint. Drag mounts on the hull; select a mount to change type or equip a weapon from mods/*/weapons/*.json.", skin)).left().width(720f).row();
+        editorWindow.add(new Label("Collider: drag points; hovered points are yellow. Insert mode: click white-highlighted collider edges to add vertices.", skin)).left().width(720f).row();
 
         editorWindow.pack();
         editorWindow.setPosition(10f, Math.max(10f, stage.getHeight() - editorWindow.getHeight() - 10f));
@@ -290,6 +327,74 @@ public class ModdingScreen {
         return shipEditor.isInsertModeEnabled() ? "Insert: ON" : "Insert: OFF";
     }
 
+    private void refreshMountEditorLabels() {
+        if (mountEditorInfoLabel == null || slotTypeToggleButton == null) return;
+        WeaponSlot s = shipEditor.getSelectedWeaponSlot();
+        if (s == null) {
+            mountEditorInfoLabel.setText("Weapon slot: none selected (click a mount handle).");
+            slotTypeToggleButton.setText("Slot type: —");
+            return;
+        }
+        String eq = s.equippedWeaponId == null || s.equippedWeaponId.isBlank() ? "(empty)" : s.equippedWeaponId;
+        mountEditorInfoLabel.setText("Selected " + s.id + " at (" + (int) s.x + ", " + (int) s.y + ") — " + s.type + " — equipped: " + eq);
+        slotTypeToggleButton.setText("Slot type: " + s.type + " (click to toggle)");
+    }
+
+    private void openEquipWeaponDialog() {
+        WeaponSlot slot = shipEditor.getSelectedWeaponSlot();
+        if (slot == null) return;
+
+        Dialog dialog = new Dialog("Equip weapon", skin, "dialog") {
+            @Override
+            protected void result(Object object) {
+                // dismiss
+            }
+        };
+        dialog.getContentTable().defaults().pad(4f).growX();
+        List<WeaponData> weapons = WeaponDataIO.listAllWeapons();
+        if (weapons.isEmpty()) {
+            dialog.getContentTable().add(new Label("No weapons found. Add JSON under mods/<mod>/weapons/", skin)).row();
+        } else {
+            Table list = new Table(skin);
+            int compatible = 0;
+            for (WeaponData wd : weapons) {
+                if (!wd.canEquipOn(slot.type)) continue;
+                compatible++;
+                TextButton pick = new TextButton(wd.id + " — " + wd.name, skin);
+                pick.addListener(new ChangeListener() {
+                    @Override
+                    public void changed(ChangeEvent event, Actor actor) {
+                        shipEditor.setSelectedWeaponEquippedId(wd.id);
+                        refreshMountEditorLabels();
+                        dialog.hide();
+                    }
+                });
+                list.add(pick).growX().row();
+            }
+            if (compatible == 0) {
+                list.add(new Label("No weapons compatible with " + slot.type + ".", skin)).row();
+            }
+            ScrollPane scroll = new ScrollPane(list, skin);
+            scroll.setFadeScrollBars(false);
+            scroll.setScrollingDisabled(true, false);
+            dialog.getContentTable().add(scroll).width(420f).height(260f).row();
+        }
+
+        TextButton clear = new TextButton("Clear slot", skin);
+        clear.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                shipEditor.setSelectedWeaponEquippedId(null);
+                refreshMountEditorLabels();
+                dialog.hide();
+            }
+        });
+        dialog.getContentTable().add(clear).row();
+
+        dialog.button("Close", true);
+        dialog.show(stage);
+    }
+
     /** Tiny dynamic array helper to keep this file dependency-light. */
     private static class SimpleArray<T> {
         private Object[] data = new Object[16];
@@ -311,7 +416,10 @@ public class ModdingScreen {
     }
 
     public void update(float deltaTime) {
-        if (mode == Mode.EDIT) shipEditor.update(deltaTime);
+        if (mode == Mode.EDIT) {
+            shipEditor.update(deltaTime);
+            refreshMountEditorLabels();
+        }
     }
 
     public void render() {

@@ -1,0 +1,13 @@
+{
+  "id": "burst_laser",
+  "name": "Burst Laser",
+  "type": "BALLISTIC",
+  "fireInterval": 0.35,
+  "projectileSpeed": 280,
+  "projectileLifetime": 2,
+  "projectileRadius": 2.5,
+  "turretSprite": "mods/core/basic turret.png",
+  "turretCompatible": true,
+  "hardpointCompatible": true,
+  "turnRateDegPerSec": 540
+}

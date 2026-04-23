@@ -1,0 +1,15 @@
+{
+  "id": "homing_needle",
+  "name": "Homing Needle",
+  "type": "MISSILE",
+  "fireInterval": 0.9,
+  "projectileSpeed": 190,
+  "projectileLifetime": 4,
+  "projectileRadius": 3.5,
+  "turretSprite": "mods/core/basic turret.png",
+  "turretCompatible": false,
+  "hardpointCompatible": true,
+  "turnRateDegPerSec": 0,
+  "homing": true,
+  "homingTurnRateDegPerSec": 155
+}

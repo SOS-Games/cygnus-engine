@@ -33,6 +33,26 @@ public final class ShipDataIO {
         if (data.name == null || data.name.isBlank()) data.name = id;
         if (data.texturePath == null || data.texturePath.isBlank()) data.texturePath = textureFile.path();
 
+        data.normalizeWeaponSlots();
+        data.normalizeCombatProfile();
+
+        return data;
+    }
+
+    /** Load ship data from a standalone JSON file (e.g. {@code mods/core/frigate.json}). */
+    public static ShipData loadFromJson(FileHandle jsonFile) {
+        if (jsonFile == null || !jsonFile.exists()) {
+            return null;
+        }
+        ShipData data = newJson().fromJson(ShipData.class, jsonFile);
+        if (data.id == null || data.id.isBlank()) {
+            data.id = jsonFile.nameWithoutExtension();
+        }
+        if (data.name == null || data.name.isBlank()) {
+            data.name = data.id;
+        }
+        data.normalizeWeaponSlots();
+        data.normalizeCombatProfile();
         return data;
     }
 

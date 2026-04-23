@@ -35,5 +35,14 @@
 		"x": -5,
 		"y": 16
 	}
+],
+"weaponSlots": [
+	{
+		"id": "nose",
+		"x": 0,
+		"y": 14,
+		"type": "TURRET",
+		"equippedWeaponId": "burst_laser"
+	}
 ]
 }

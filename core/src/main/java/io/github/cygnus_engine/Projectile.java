@@ -11,6 +11,9 @@ public class Projectile implements Pool.Poolable {
     public float lifetime;
     public float radius;
     public boolean alive;
+    public boolean homing;
+    public GameObject homingTarget;
+    public float homingTurnRateDegPerSec;
 
     @Override
     public void reset() {
@@ -21,5 +24,8 @@ public class Projectile implements Pool.Poolable {
         lifetime = 0f;
         radius = 0f;
         alive = false;
+        homing = false;
+        homingTarget = null;
+        homingTurnRateDegPerSec = 0f;
     }
 }

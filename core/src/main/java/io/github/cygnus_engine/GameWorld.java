@@ -5,10 +5,14 @@ import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Sprite;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.ObjectMap;
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.Gdx;
 
 public class GameWorld {
     private static final float WORLD_WIDTH = 800f;
@@ -29,9 +33,12 @@ public class GameWorld {
     private Texture playerTexture;
     private Sprite playerSprite;
     private ShipData playerShipData;
+    /** Optional second hull template for mixed NPC spawns (falls back to fighter). */
+    private ShipData npcFrigateTemplate;
     private float playerShipRadius = 18f;
-    private float npcShipMaxSpeed = 60f;
     private ProjectileManager projectileManager;
+    private final ObjectMap<String, Texture> weaponTextureCache = new ObjectMap<>();
+    private final Vector2 tmpMountDraw = new Vector2();
     
     public GameWorld() {
         shapeRenderer = new ShapeRenderer();
@@ -49,6 +56,10 @@ public class GameWorld {
         spriteBatch = new SpriteBatch();
         spriteBatch.setProjectionMatrix(camera.combined);
         loadPlayerShip("fighter");
+        npcFrigateTemplate = ShipDataIO.loadFromJson(Gdx.files.local("mods/core/frigate.json"));
+        if (npcFrigateTemplate == null) {
+            npcFrigateTemplate = playerShipData;
+        }
 
         initialize();
     }
@@ -79,7 +90,16 @@ public class GameWorld {
         );
         playerSprite.rotate90(true);
         playerShipRadius = Math.max(spriteWidth, spriteHeight) * 0.5f;
-        npcShipMaxSpeed = playerShipData.speed;
+    }
+
+    private static float npcRadiusFromShipData(ShipData data, float fallbackRadius) {
+        if (data == null || data.bounds == null) {
+            return fallbackRadius;
+        }
+        if (data.bounds.width > 0f && data.bounds.height > 0f) {
+            return Math.max(data.bounds.width, data.bounds.height) * 0.5f;
+        }
+        return fallbackRadius;
     }
     
     private void initialize() {
@@ -99,21 +119,58 @@ public class GameWorld {
             float x = MathUtils.random(100f, WORLD_WIDTH - 100f);
             float y = MathUtils.random(100f, WORLD_HEIGHT - 100f);
 
-            GameObject orbitTarget = Math.random() > 0.5 ? planet : spaceStation; 
+            GameObject orbitTarget = Math.random() > 0.5 ? planet : spaceStation;
+
+            ShipData template = (i % 2 == 0) ? playerShipData : npcFrigateTemplate;
+            float shipRadius = npcRadiusFromShipData(template, playerShipRadius);
 
             SpaceShip ship = new SpaceShip(
                 x,
                 y,
-                playerShipRadius,
-                "Random Ship " + (i + 1),
+                shipRadius,
+                "Ship " + (i + 1) + " (" + template.id + ")",
                 orbitTarget,
-                npcShipMaxSpeed
+                template.speed
             );
-            
+            ship.configureFromShipData(template);
+            ship.configureWeaponInstances(buildWeaponInstances(template));
+
             spaceShips.add(ship);
             gameObjects.add(ship);
             GameUtils.addSpaceShip(ship);
         }
+    }
+
+    private Array<ShipWeaponInstance> buildWeaponInstances(ShipData data) {
+        Array<ShipWeaponInstance> out = new Array<>();
+        if (data == null || data.weaponSlots == null) return out;
+        for (WeaponSlot slot : data.weaponSlots) {
+            if (slot.equippedWeaponId == null || slot.equippedWeaponId.isBlank()) continue;
+            WeaponData wd = WeaponDataIO.loadById(slot.equippedWeaponId);
+            if (wd == null || !wd.canEquipOn(slot.type)) continue;
+            ShipWeaponInstance inst = new ShipWeaponInstance(slot, wd);
+            if (wd.turretSprite != null && !wd.turretSprite.isBlank()) {
+                Texture tex = obtainWeaponTexture(wd.turretSprite);
+                if (tex != null) {
+                    inst.textureRef = tex;
+                    inst.region = new TextureRegion(tex);
+                }
+            }
+            inst.aimAngleDeg = 0f;
+            out.add(inst);
+        }
+        return out;
+    }
+
+    private Texture obtainWeaponTexture(String path) {
+        Texture cached = weaponTextureCache.get(path);
+        if (cached != null) return cached;
+        FileHandle fh = WeaponDataIO.resolveTextureFile(path);
+        if (fh == null || !fh.exists()) return null;
+        Texture tex = new Texture(fh);
+        tex.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        weaponTextureCache.put(path, tex);
+        return tex;
     }
     
     public void update(float deltaTime) {
@@ -125,7 +182,7 @@ public class GameWorld {
         
         // Update other game objects
         for (GameObject obj : gameObjects) {
-            if (!(obj instanceof SpaceShip) && !(obj instanceof SpaceShip)) {
+            if (!(obj instanceof SpaceShip)) {
                 obj.update(deltaTime);
             }
         }
@@ -182,6 +239,25 @@ public class GameWorld {
                     playerSprite.setPosition(obj.getX() - playerSprite.getOriginX(), obj.getY() - playerSprite.getOriginY());
                     playerSprite.setRotation(obj.getRotation());
                     playerSprite.draw(spriteBatch);
+                    SpaceShip ship = (SpaceShip) obj;
+                    for (ShipWeaponInstance w : ship.getWeaponInstances()) {
+                        if (w.region == null) continue;
+                        ship.writeMountWorldPosition(w.slot, tmpMountDraw);
+                        float rw = w.region.getRegionWidth();
+                        float rh = w.region.getRegionHeight();
+                        spriteBatch.draw(
+                            w.region,
+                            tmpMountDraw.x - rw / 2f,
+                            tmpMountDraw.y - rh / 2f,
+                            rw / 2f,
+                            rh / 2f,
+                            rw,
+                            rh,
+                            1f,
+                            1f,
+                            w.aimAngleDeg
+                        );
+                    }
                     spriteBatch.end();
 
                     // the sprites do not respect viewport size!!!
@@ -189,6 +265,7 @@ public class GameWorld {
                 case DEBUG_INDICATOR:
                     shapeRenderer.setColor(Color.RED);
                     shapeRenderer.circle(obj.getX(), obj.getY(), obj.getSize());
+                    break;
             }
         }
         projectileManager.render(shapeRenderer);
@@ -282,5 +359,9 @@ public class GameWorld {
         shapeRenderer.dispose();
         spriteBatch.dispose();
         if (playerTexture != null) playerTexture.dispose();
+        for (Texture t : weaponTextureCache.values()) {
+            if (t != null) t.dispose();
+        }
+        weaponTextureCache.clear();
     }
 }

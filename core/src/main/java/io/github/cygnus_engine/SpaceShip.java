@@ -1,6 +1,8 @@
 package io.github.cygnus_engine;
 
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.utils.Array;
 
 // todo:
 
@@ -36,6 +38,14 @@ import com.badlogic.gdx.math.MathUtils;
 
 
 public class SpaceShip extends GameObject {
+
+    public enum CombatProfile {
+        /** Point hull at target, strafe dodge, kinetic aim. */
+        FIGHTER,
+        /** Orbit at standoff radius; no dodge strafe; hull tangential drift; turrets and homing do damage. */
+        FRIGATE
+    }
+
     private GameObject orbitTarget = null;
     private GameObject combatTarget = null;
     private float prevX, prevY = 0f;
@@ -45,19 +55,18 @@ public class SpaceShip extends GameObject {
     private float targetAngle = 0f; // Desired direction in degrees
     private float directionChangeTimer = 0f;
     private float directionChangeInterval = 2f;
-    private float maneuverability = 200f; // limits maximum rotationChange per frame
+    private float maneuverability = 200f; // limits maximum rotationChange per frame (deg/sec when driven from ShipData)
+    private CombatProfile combatProfile = CombatProfile.FIGHTER;
+    private float orbitCombatRadius = 220f;
+    private float orbitCombatBand = 50f;
+    private float frigateOrbitSign = 1f;
     private float seekCombatTargetTimer = 0f;
     private float seekCombatTargetInterval = 0.5f;
     private float dodgeTimer = 0f;
     private float dodgeDirection = 1f;
     private float dodgeInterval = 1.5f;
 
-    private float bulletSpeed = 280f;
     private float combatAimToleranceDegrees = 12f;
-    private float projectileRadius = 2.5f;
-    private float projectileLifetime = 2f;
-    private float fireCooldown = 0f;
-    private float fireInterval = 0.35f;
     private float velocityX = 0f;
     private float velocityY = 0f;
     private boolean linedUpForShot = false; // todo - use this to fire bullets when I add the projectile system
@@ -86,6 +95,10 @@ public class SpaceShip extends GameObject {
     private float warpSpeed = 600f; // max warp speed
     private float warpTimer = 0f; // Timer for warp effects
     private boolean isVisible = true;
+
+    private final Array<ShipWeaponInstance> weaponInstances = new Array<>();
+    private final Vector2 tmpSlotOffset = new Vector2();
+    private float legacyFireCooldown = 0f;
     
     public enum Behavior {
         FLYING_TO_TARGET,
@@ -105,7 +118,7 @@ public class SpaceShip extends GameObject {
         this.currentSpeed = maxNormalSpeed;
 
         this.cargo = new Cargo(true);
-        
+
         maxDistanceFromOrbitTargetSquared = (float) Math.pow(maxDistanceFromOrbitTarget, 2);
         detectCombatDistanceSquared = (float) Math.pow(detectCombatDistance, 2);
         combatMinDistanceSquared = (float) Math.pow(combatMinDistance, 2);
@@ -124,8 +137,47 @@ public class SpaceShip extends GameObject {
         update(deltaTime, null);
     }
 
+    public void configureWeaponInstances(Array<ShipWeaponInstance> instances) {
+        weaponInstances.clear();
+        if (instances != null) {
+            weaponInstances.addAll(instances);
+        }
+    }
+
+    /** Apply hull AI tuning and combat movement style from mod ship JSON. */
+    public void configureFromShipData(ShipData data) {
+        if (data == null) {
+            return;
+        }
+        data.normalizeCombatProfile();
+        combatProfile = parseCombatProfile(data.combatProfile);
+        orbitCombatRadius = data.orbitCombatRadius;
+        orbitCombatBand = data.orbitCombatBand;
+        if (data.hullTurnDegPerSec > 0f) {
+            maneuverability = data.hullTurnDegPerSec;
+        }
+    }
+
+    private static CombatProfile parseCombatProfile(String raw) {
+        if (raw == null) {
+            return CombatProfile.FIGHTER;
+        }
+        return switch (raw.trim().toUpperCase()) {
+            case "FRIGATE" -> CombatProfile.FRIGATE;
+            default -> CombatProfile.FIGHTER;
+        };
+    }
+
+    public CombatProfile getCombatProfile() {
+        return combatProfile;
+    }
+
+    public Array<ShipWeaponInstance> getWeaponInstances() {
+        return weaponInstances;
+    }
+
     public void update(float deltaTime, ProjectileManager projectileManager) {
-        fireCooldown = Math.max(0f, fireCooldown - deltaTime);
+        legacyFireCooldown = Math.max(0f, legacyFireCooldown - deltaTime);
 
         switch (currentBehavior) {
             case WARPING_OUT:
@@ -142,29 +194,118 @@ public class SpaceShip extends GameObject {
                 seekCombatTarget(deltaTime);
                 if (combatTarget != null) {
                     updateCombatBehavior(deltaTime);
+                    updateWeaponAiming(deltaTime, combatTarget);
                     tryFire(projectileManager);
                 } else {
                     linedUpForShot = false;
                     currentSpeed = maxNormalSpeed;
                     strafeSpeed = 0f;
+                    updateWeaponAiming(deltaTime, null);
                     changeDirectionPeriodically(deltaTime);
                 }
         }
-                
+
         updateRotation(deltaTime);
         updatePosition(deltaTime);
     }
 
+    private void updateWeaponAiming(float deltaTime, GameObject target) {
+        for (ShipWeaponInstance w : weaponInstances) {
+            if (w.data == null) continue;
+            w.fireCooldown = Math.max(0f, w.fireCooldown - deltaTime);
+
+            if (w.slot.type == WeaponSlot.SlotType.TURRET && target != null) {
+                mountWorldOffset(w.slot, tmpSlotOffset);
+                float wx = getX() + tmpSlotOffset.x;
+                float wy = getY() + tmpSlotOffset.y;
+                float interceptX = target.getX();
+                float interceptY = target.getY();
+                if (target instanceof SpaceShip ts) {
+                    float ddx = target.getX() - getX();
+                    float ddy = target.getY() - getY();
+                    float dist = (float) Math.sqrt(ddx * ddx + ddy * ddy);
+                    float travel = dist / Math.max(1f, w.data.projectileSpeed);
+                    interceptX += ts.getVelocityX() * travel;
+                    interceptY += ts.getVelocityY() * travel;
+                }
+                float desired = getAngleToPoint(wx, wy, interceptX, interceptY);
+                w.aimAngleDeg = rotateTowardDeg(w.aimAngleDeg, desired, w.data.turnRateDegPerSec * deltaTime);
+            } else {
+                w.aimAngleDeg = getRotation();
+            }
+        }
+    }
+
     private void tryFire(ProjectileManager projectileManager) {
-        if (projectileManager == null || !linedUpForShot || fireCooldown > 0f) {
+        if (projectileManager == null || combatTarget == null) {
             return;
         }
 
+        float distanceToTargetSquared = getDistanceToSquared(combatTarget);
+        if (distanceToTargetSquared > combatFireRangeSquared) {
+            return;
+        }
+
+        if (weaponInstances.size == 0) {
+            if (!linedUpForShot || legacyFireCooldown > 0f) {
+                return;
+            }
+            tryFireLegacyForward(projectileManager);
+            legacyFireCooldown = 0.35f;
+            return;
+        }
+
+        for (ShipWeaponInstance w : weaponInstances) {
+            if (w.data == null || w.fireCooldown > 0f) continue;
+
+            boolean homing = w.data.homing && combatTarget != null;
+            float aimTolerance = homing ? 55f : combatAimToleranceDegrees;
+            float aimDiff = Math.abs(shortestDeltaDeg(w.aimAngleDeg, aimAngleForIntercept(w)));
+            if (aimDiff > aimTolerance) continue;
+
+            mountWorldOffset(w.slot, tmpSlotOffset);
+            float cos = MathUtils.cosDeg(w.aimAngleDeg);
+            float sin = MathUtils.sinDeg(w.aimAngleDeg);
+            float back = w.data.projectileRadius + 2f;
+            float spawnX = getX() + tmpSlotOffset.x + cos * back;
+            float spawnY = getY() + tmpSlotOffset.y + sin * back;
+
+            if (homing) {
+                projectileManager.spawn(
+                    this,
+                    spawnX,
+                    spawnY,
+                    w.aimAngleDeg,
+                    w.data.projectileSpeed,
+                    w.data.projectileLifetime,
+                    w.data.projectileRadius,
+                    combatTarget,
+                    w.data.homingTurnRateDegPerSec
+                );
+            } else {
+                projectileManager.spawn(
+                    this,
+                    spawnX,
+                    spawnY,
+                    w.aimAngleDeg,
+                    w.data.projectileSpeed,
+                    w.data.projectileLifetime,
+                    w.data.projectileRadius
+                );
+            }
+            w.fireCooldown = w.data.fireInterval;
+        }
+    }
+
+    /** Fallback when a ship has no configured mounts (e.g. legacy data). */
+    private void tryFireLegacyForward(ProjectileManager projectileManager) {
+        float bulletSpeed = 280f;
+        float projectileLifetime = 2f;
+        float projectileRadius = 2.5f;
         float rad = (float) Math.toRadians(getRotation());
         float muzzleOffset = getSize() + projectileRadius + 2f;
         float spawnX = getX() + (float) Math.cos(rad) * muzzleOffset;
         float spawnY = getY() + (float) Math.sin(rad) * muzzleOffset;
-
         projectileManager.spawn(
             this,
             spawnX,
@@ -174,7 +315,59 @@ public class SpaceShip extends GameObject {
             projectileLifetime,
             projectileRadius
         );
-        fireCooldown = fireInterval;
+    }
+
+    private float aimAngleForIntercept(ShipWeaponInstance w) {
+        if (combatTarget == null || w.data == null) return getRotation();
+        mountWorldOffset(w.slot, tmpSlotOffset);
+        float wx = getX() + tmpSlotOffset.x;
+        float wy = getY() + tmpSlotOffset.y;
+        float ix = combatTarget.getX();
+        float iy = combatTarget.getY();
+        if (combatTarget instanceof SpaceShip ts) {
+            float ddx = combatTarget.getX() - getX();
+            float ddy = combatTarget.getY() - getY();
+            float dist = (float) Math.sqrt(ddx * ddx + ddy * ddy);
+            float travel = dist / Math.max(1f, w.data.projectileSpeed);
+            ix += ts.getVelocityX() * travel;
+            iy += ts.getVelocityY() * travel;
+        }
+        return getAngleToPoint(wx, wy, ix, iy);
+    }
+
+    private void mountWorldOffset(WeaponSlot slot, Vector2 out) {
+        out.set(slot.x, slot.y).rotateDeg(getRotation());
+    }
+
+    /** World position of a mount point for this frame (ship center + rotated slot offset). */
+    public void writeMountWorldPosition(WeaponSlot slot, Vector2 out) {
+        mountWorldOffset(slot, out);
+        out.add(getX(), getY());
+    }
+
+    private static float getAngleToPoint(float fromX, float fromY, float toX, float toY) {
+        return (float) Math.toDegrees(Math.atan2(toY - fromY, toX - fromX));
+    }
+
+    private static float shortestDeltaDeg(float fromDeg, float toDeg) {
+        float d = toDeg - fromDeg;
+        while (d > 180f) d -= 360f;
+        while (d < -180f) d += 360f;
+        return d;
+    }
+
+    private static float rotateTowardDeg(float fromDeg, float toDeg, float maxStepDeg) {
+        float diff = shortestDeltaDeg(fromDeg, toDeg);
+        if (Math.abs(diff) <= maxStepDeg) {
+            return normalizeAngle360(toDeg);
+        }
+        return normalizeAngle360(fromDeg + Math.signum(diff) * maxStepDeg);
+    }
+
+    private static float normalizeAngle360(float angle) {
+        float n = angle % 360f;
+        if (n < 0f) n += 360f;
+        return n;
     }
 
     private void warpOut(float deltaTime) {
@@ -244,10 +437,11 @@ public class SpaceShip extends GameObject {
         if (seekCombatTargetTimer >= seekCombatTargetInterval) {
             seekCombatTargetTimer = 0f;
 
-            combatTarget = getClosestShipWithinRange(detectCombatDistanceSquared);
-            if (combatTarget != null) {
-                System.out.println("found target " + combatTarget.getName());
+            GameObject found = getClosestShipWithinRange(detectCombatDistanceSquared);
+            if (found != combatTarget && found != null && combatProfile == CombatProfile.FRIGATE) {
+                frigateOrbitSign = MathUtils.randomBoolean() ? 1f : -1f;
             }
+            combatTarget = found;
         }
     }
 
@@ -270,6 +464,11 @@ public class SpaceShip extends GameObject {
             return;
         }
 
+        if (combatProfile == CombatProfile.FRIGATE) {
+            updateFrigateCombatBehavior(distanceToTargetSquared);
+            return;
+        }
+
         float bulletInterceptX = combatTarget.getX();
         float bulletInterceptY = combatTarget.getY();
 
@@ -277,6 +476,7 @@ public class SpaceShip extends GameObject {
             SpaceShip targetShip = (SpaceShip) combatTarget;
 
             float distanceToTarget = (float) Math.sqrt(distanceToTargetSquared);
+            float bulletSpeed = representativeProjectileSpeed();
             float bulletTravelTime = distanceToTarget / bulletSpeed;
 
             bulletInterceptX += targetShip.getVelocityX() * bulletTravelTime;
@@ -304,6 +504,30 @@ public class SpaceShip extends GameObject {
             float dodgeStrength = 0.4f;
             strafeSpeed = maxNormalSpeed * dodgeStrength * dodgeDirection;
             dodgeTimer = MathUtils.random(0.4f, dodgeInterval);
+        }
+    }
+
+    private void updateFrigateCombatBehavior(float distanceToTargetSquared) {
+        linedUpForShot = false;
+        float dist = (float) Math.sqrt(distanceToTargetSquared);
+        float r = orbitCombatRadius;
+        float band = orbitCombatBand;
+
+        float angleToTarget = getAngleToObject(combatTarget.getX(), combatTarget.getY());
+        float tangent = normalizeAngle(angleToTarget + 90f * frigateOrbitSign);
+
+        if (dist > r + band) {
+            targetAngle = normalizeAngle(angleToTarget);
+            currentSpeed = maxNormalSpeed * 0.85f;
+            strafeSpeed = maxNormalSpeed * 0.18f * frigateOrbitSign;
+        } else if (dist < r - band) {
+            targetAngle = normalizeAngle(angleToTarget + 180f);
+            currentSpeed = -maxNormalSpeed * 0.48f;
+            strafeSpeed = maxNormalSpeed * 0.42f * frigateOrbitSign;
+        } else {
+            targetAngle = tangent;
+            currentSpeed = maxNormalSpeed * 0.1f;
+            strafeSpeed = maxNormalSpeed * 0.92f * frigateOrbitSign;
         }
     }
 
@@ -418,6 +642,13 @@ public class SpaceShip extends GameObject {
         float normalized = angle % 360f;
         if (normalized < 0) normalized += 360f;
         return normalized;
+    }
+
+    private float representativeProjectileSpeed() {
+        if (weaponInstances.size > 0 && weaponInstances.first().data != null) {
+            return weaponInstances.first().data.projectileSpeed;
+        }
+        return 280f;
     }
 
     private float getDistanceToSquared(GameObject target) {
