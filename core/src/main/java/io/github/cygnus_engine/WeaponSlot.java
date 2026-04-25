@@ -15,6 +15,7 @@ public class WeaponSlot {
     public float x;
     public float y;
     public SlotType type = SlotType.TURRET;
+    
     /** Weapon definition id (JSON under each mod's {@code weapons} folder), or null if empty. */
     public String equippedWeaponId;
 

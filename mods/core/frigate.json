@@ -1,7 +1,7 @@
 {
   "id": "frigate",
   "name": "Patrol Frigate",
-  "texturePath": "mods/core/fighter.png",
+  "texturePath": "mods/core/light frigate 1.png",
   "speed": 72,
   "maneuverability": 2,
   "cargoSpace": 8,

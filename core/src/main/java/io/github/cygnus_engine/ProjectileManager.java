@@ -3,7 +3,6 @@ package io.github.cygnus_engine;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Intersector;
-import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Pool;
@@ -74,6 +73,8 @@ public class ProjectileManager {
             }
 
             if (projectile.alive) {
+                // todo - this tries to check a collision against every single ship in the loaded area
+                // the more ships and more bullets, the exponentially longer this will take
                 for (SpaceShip ship : ships) {
                     if (!ship.isVisible() || ship == projectile.owner) {
                         continue;
@@ -104,31 +105,34 @@ public class ProjectileManager {
         if (!p.homing) {
             return;
         }
-        GameObject t = p.homingTarget;
-        if (t == null) {
+
+        GameObject homingTarget = p.homingTarget;
+        if (homingTarget == null) {
             return;
         }
-        if (t instanceof SpaceShip ss && !ss.isVisible()) {
+
+        if (homingTarget instanceof SpaceShip ss && !ss.isVisible()) {
             p.homingTarget = null;
             return;
         }
+
         float speed = p.velocity.len();
         if (speed < 1f) {
             return;
         }
-        float targetAng = MathUtils.atan2(t.getY() - p.position.y, t.getX() - p.position.x) * MathUtils.radiansToDegrees;
-        float curAng = p.velocity.angleDeg();
-        float diff = shortestSignedAngleDeg(curAng, targetAng);
-        float step = p.homingTurnRateDegPerSec * deltaTime;
-        float turn = Math.signum(diff) * Math.min(Math.abs(diff), step);
-        p.velocity.set(speed, 0f).setAngleDeg(curAng + turn);
-    }
 
-    private static float shortestSignedAngleDeg(float fromDeg, float toDeg) {
-        float d = toDeg - fromDeg;
-        while (d > 180f) d -= 360f;
-        while (d < -180f) d += 360f;
-        return d;
+        float angleToTarget = CustomMathUtils.getAngleBetweenPoints(p.position.x, p.position.y, homingTarget.getX(), homingTarget.getY());
+        float currentMovementAngle = p.velocity.angleDeg();
+
+        float diff = CustomMathUtils.deltaDeg(currentMovementAngle, angleToTarget);
+        float direction = Math.signum(diff);
+        float absDiff = Math.abs(diff);
+
+        float maxRotationThisFrame = p.homingTurnRateDegPerSec * deltaTime;
+        
+        float turn = direction * Math.min(absDiff, maxRotationThisFrame);
+
+        p.velocity.set(speed, 0f).setAngleDeg(currentMovementAngle + turn);
     }
 
     public void render(ShapeRenderer shapeRenderer) {

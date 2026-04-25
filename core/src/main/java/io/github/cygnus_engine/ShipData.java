@@ -10,6 +10,7 @@ import com.badlogic.gdx.math.Vector2;
 public class ShipData {
     /** Stable id / filename (e.g. "fighter"). */
     public String id;
+    
     /** Display name for UI (defaults to id). */
     public String name;
 
@@ -25,10 +26,13 @@ public class ShipData {
      * {@link #orbitCombatRadius}, no dodge strafe; relies on turrets and homing weapons).
      */
     public String combatProfile = "FIGHTER";
+    
     /** Preferred standoff distance to enemy when using frigate orbit AI. */
     public float orbitCombatRadius = 220f;
+    
     /** Hysteresis band so the ship does not oscillate at the orbit radius. */
     public float orbitCombatBand = 50f;
+    
     /**
      * Hull yaw limit in degrees per second when this JSON is applied to an AI {@link SpaceShip}.
      * Use {@code 0} to keep engine default.
@@ -42,9 +46,12 @@ public class ShipData {
     public Rectangle bounds = new Rectangle(-16, -16, 32, 32);
 
     public Vector2 centerOfMass = new Vector2();
+    
     /** Mount points (sockets); each may reference a {@link WeaponData} id via {@link WeaponSlot#equippedWeaponId}. */
     public List<WeaponSlot> weaponSlots = new ArrayList<>();
+    
     public List<Vector2> enginePositions = new ArrayList<Vector2>();
+    
     /** Polygon-like collider vertices relative to ship center. */
     public List<Vector2> colliderVertices = new ArrayList<Vector2>();
 
@@ -54,10 +61,13 @@ public class ShipData {
         }
         for (int i = 0; i < weaponSlots.size(); i++) {
             WeaponSlot s = weaponSlots.get(i);
+
             if (s == null) continue;
+
             if (s.id == null || s.id.isBlank()) {
                 s.id = "slot_" + i;
             }
+
             if (s.type == null) {
                 s.type = WeaponSlot.SlotType.TURRET;
             }
@@ -70,6 +80,7 @@ public class ShipData {
         } else {
             combatProfile = combatProfile.trim().toUpperCase();
         }
+        
         if (orbitCombatRadius <= 0f) {
             orbitCombatRadius = 220f;
         }

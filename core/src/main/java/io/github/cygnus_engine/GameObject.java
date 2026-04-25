@@ -37,11 +37,9 @@ public class GameObject {
     public void update(float deltaTime) {
         x += speedX * deltaTime;
         y += speedY * deltaTime;
+
         rotation += rotationSpeed * deltaTime;
-        
-        // Normalize rotation to 0-360 range
-        rotation = rotation % 360f;
-        if (rotation < 0) rotation += 360f;
+        rotation = CustomMathUtils.normalizeAngle360(rotation);
     }
     
     public boolean containsPoint(float pointX, float pointY) {
@@ -76,6 +74,7 @@ public class GameObject {
         }
     }
     
+    // unused
     public void wrapAroundScreen(float screenWidth, float screenHeight) {
         if (x - size > screenWidth) {
             x = -size;
@@ -101,10 +100,8 @@ public class GameObject {
     // Setters for position (useful for wrapping)
     public void setX(float x) { this.x = x; }
     public void setY(float y) { this.y = y; }
+
     public void setRotation(float rotation) { 
-        this.rotation = rotation;
-        // Normalize rotation to 0-360 range
-        this.rotation = this.rotation % 360f;
-        if (this.rotation < 0) this.rotation += 360f;
+        this.rotation = CustomMathUtils.normalizeAngle360(rotation);
     }
 }

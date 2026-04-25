@@ -240,11 +240,15 @@ public class GameWorld {
                     playerSprite.setRotation(obj.getRotation());
                     playerSprite.draw(spriteBatch);
                     SpaceShip ship = (SpaceShip) obj;
+
                     for (ShipWeaponInstance w : ship.getWeaponInstances()) {
                         if (w.region == null) continue;
+
                         ship.writeMountWorldPosition(w.slot, tmpMountDraw);
+
                         float rw = w.region.getRegionWidth();
                         float rh = w.region.getRegionHeight();
+
                         spriteBatch.draw(
                             w.region,
                             tmpMountDraw.x - rw / 2f,
@@ -255,7 +259,7 @@ public class GameWorld {
                             rh,
                             1f,
                             1f,
-                            w.aimAngleDeg
+                            w.aimAngleDeg - 90f
                         );
                     }
                     spriteBatch.end();

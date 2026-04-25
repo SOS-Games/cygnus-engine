@@ -8,12 +8,16 @@ import com.badlogic.gdx.graphics.g2d.TextureRegion;
  */
 public class ShipWeaponInstance {
     public final WeaponSlot slot;
+
     public WeaponData data;
+    
     /** World-space aim angle in degrees (LibGDX convention, same as ship rotation). */
     public float aimAngleDeg;
+
     public float fireCooldown;
 
     public TextureRegion region;
+    
     /** Non-owning reference; textures owned by cache in {@link GameWorld}. */
     public Texture textureRef;
 

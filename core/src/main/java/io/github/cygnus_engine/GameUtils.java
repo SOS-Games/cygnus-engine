@@ -23,7 +23,9 @@ public class GameUtils {
 
             float dx = ship.getX() - currentX;
             float dy = ship.getY() - currentY;
+
             float distanceSquared = dx * dx + dy * dy;
+            
             if (distanceSquared < closestDistanceSquared) {
                 closestDistanceSquared = distanceSquared;
                 closestShip = ship;
