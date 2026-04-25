@@ -5,10 +5,8 @@ import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Sprite;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
-import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.ObjectMap;
 import com.badlogic.gdx.files.FileHandle;
@@ -30,15 +28,14 @@ public class GameWorld {
     private GameObject clickedObject;
 
     private SpriteBatch spriteBatch; // For future use with textures and fonts
-    private Texture playerTexture;
-    private Sprite playerSprite;
     private ShipData playerShipData;
     /** Optional second hull template for mixed NPC spawns (falls back to fighter). */
     private ShipData npcFrigateTemplate;
     private float playerShipRadius = 18f;
     private ProjectileManager projectileManager;
+    private final ObjectMap<String, ShipData> shipDataById = new ObjectMap<>();
+    private final ObjectMap<String, Texture> shipTextureCache = new ObjectMap<>();
     private final ObjectMap<String, Texture> weaponTextureCache = new ObjectMap<>();
-    private final Vector2 tmpMountDraw = new Vector2();
     
     public GameWorld() {
         shapeRenderer = new ShapeRenderer();
@@ -55,8 +52,9 @@ public class GameWorld {
 
         spriteBatch = new SpriteBatch();
         spriteBatch.setProjectionMatrix(camera.combined);
+        loadAllShipSprites();
         loadPlayerShip("fighter");
-        npcFrigateTemplate = ShipDataIO.loadFromJson(Gdx.files.local("mods/core/frigate.json"));
+        npcFrigateTemplate = shipDataById.get("frigate");
         if (npcFrigateTemplate == null) {
             npcFrigateTemplate = playerShipData;
         }
@@ -64,18 +62,41 @@ public class GameWorld {
         initialize();
     }
 
-    private void loadPlayerShip(String shipId) {
-        FileHandle textureFile = com.badlogic.gdx.Gdx.files.local("mods/core/" + shipId + ".png");
-        playerShipData = ShipDataIO.loadOrCreateDefault(textureFile);
-
-        FileHandle resolvedTexture = com.badlogic.gdx.Gdx.files.local(playerShipData.texturePath);
-        if (!resolvedTexture.exists()) {
-            resolvedTexture = com.badlogic.gdx.Gdx.files.internal("images/" + shipId + ".png");
+    private void loadAllShipSprites() {
+        shipDataById.clear();
+        FileHandle modsDir = Gdx.files.local("mods");
+        if (!modsDir.exists()) {
+            return;
         }
 
-        playerTexture = new Texture(resolvedTexture);
-        playerTexture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
-        playerSprite = new Sprite(playerTexture);
+        for (FileHandle modFolder : modsDir.list()) {
+            if (!modFolder.isDirectory()) continue;
+            for (FileHandle file : modFolder.list()) {
+                if (!"json".equalsIgnoreCase(file.extension())) continue;
+                ShipData data = ShipDataIO.loadFromJson(file);
+                if (data == null || data.id == null || data.id.isBlank()) continue;
+                shipDataById.put(data.id, data);
+                obtainShipTexture(data);
+            }
+        }
+    }
+
+    private void loadPlayerShip(String shipId) {
+        playerShipData = shipDataById.get(shipId);
+        if (playerShipData == null) {
+            FileHandle textureFile = com.badlogic.gdx.Gdx.files.local("mods/core/" + shipId + ".png");
+            playerShipData = ShipDataIO.loadOrCreateDefault(textureFile);
+            if (playerShipData != null && playerShipData.id != null && !playerShipData.id.isBlank()) {
+                shipDataById.put(playerShipData.id, playerShipData);
+                obtainShipTexture(playerShipData);
+            }
+        }
+        if (playerShipData == null && shipDataById.size > 0) {
+            playerShipData = shipDataById.values().next();
+        }
+        if (playerShipData == null) {
+            throw new IllegalStateException("No ship data available for player ship.");
+        }
 
         float spriteWidth = 20f;
         float spriteHeight = 20f;
@@ -83,12 +104,6 @@ public class GameWorld {
             spriteWidth = playerShipData.bounds.width;
             spriteHeight = playerShipData.bounds.height;
         }
-        playerSprite.setSize(spriteHeight, spriteWidth);
-        playerSprite.setOrigin(
-            playerSprite.getWidth() * 0.5f + playerShipData.centerOfMass.x,
-            playerSprite.getHeight() * 0.5f + playerShipData.centerOfMass.y
-        );
-        playerSprite.rotate90(true);
         playerShipRadius = Math.max(spriteWidth, spriteHeight) * 0.5f;
     }
 
@@ -133,6 +148,7 @@ public class GameWorld {
                 template.speed
             );
             ship.configureFromShipData(template);
+            ship.setHullSprite(createHullSprite(template));
             ship.configureWeaponInstances(buildWeaponInstances(template));
 
             spaceShips.add(ship);
@@ -153,13 +169,57 @@ public class GameWorld {
                 Texture tex = obtainWeaponTexture(wd.turretSprite);
                 if (tex != null) {
                     inst.textureRef = tex;
-                    inst.region = new TextureRegion(tex);
+                    Sprite turretSprite = new Sprite(tex);
+                    turretSprite.setOriginCenter();
+                    turretSprite.rotate90(true);
+                    inst.sprite = turretSprite;
                 }
             }
             inst.aimAngleDeg = 0f;
             out.add(inst);
         }
         return out;
+    }
+
+    private Texture obtainShipTexture(ShipData shipData) {
+        if (shipData == null || shipData.id == null || shipData.id.isBlank()) return null;
+        Texture cached = shipTextureCache.get(shipData.id);
+        if (cached != null) return cached;
+
+        FileHandle resolvedTexture = com.badlogic.gdx.Gdx.files.local(shipData.texturePath);
+        if (!resolvedTexture.exists()) {
+            resolvedTexture = com.badlogic.gdx.Gdx.files.internal("images/" + shipData.id + ".png");
+        }
+        if (!resolvedTexture.exists()) {
+            return null;
+        }
+
+        Texture texture = new Texture(resolvedTexture);
+        texture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        shipTextureCache.put(shipData.id, texture);
+        return texture;
+    }
+
+    private Sprite createHullSprite(ShipData shipData) {
+        Texture texture = obtainShipTexture(shipData);
+        if (texture == null) {
+            return null;
+        }
+
+        Sprite sprite = new Sprite(texture);
+        float spriteWidth = 20f;
+        float spriteHeight = 20f;
+        if (shipData.bounds != null && shipData.bounds.width > 0f && shipData.bounds.height > 0f) {
+            spriteWidth = shipData.bounds.width;
+            spriteHeight = shipData.bounds.height;
+        }
+        sprite.setSize(spriteHeight, spriteWidth);
+        sprite.setOrigin(
+            sprite.getWidth() * 0.5f + shipData.centerOfMass.x,
+            sprite.getHeight() * 0.5f + shipData.centerOfMass.y
+        );
+        sprite.rotate90(true);
+        return sprite;
     }
 
     private Texture obtainWeaponTexture(String path) {
@@ -235,32 +295,21 @@ public class GameWorld {
                     //shapeRenderer.setColor(Color.GREEN);
                     //drawRotatedTriangle(obj.getX(), obj.getY(), obj.getSize(), obj.getRotation());
 
-                    spriteBatch.begin();
-                    playerSprite.setPosition(obj.getX() - playerSprite.getOriginX(), obj.getY() - playerSprite.getOriginY());
-                    playerSprite.setRotation(obj.getRotation());
-                    playerSprite.draw(spriteBatch);
                     SpaceShip ship = (SpaceShip) obj;
+                    Sprite hullSprite = ship.getHullSprite();
+                    spriteBatch.begin();
+                    if (hullSprite != null) {
+                        hullSprite.setPosition(obj.getX() - hullSprite.getOriginX(), obj.getY() - hullSprite.getOriginY());
+                        hullSprite.setRotation(obj.getRotation());
+                        hullSprite.draw(spriteBatch);
+                    }
 
                     for (ShipWeaponInstance w : ship.getWeaponInstances()) {
-                        if (w.region == null) continue;
+                        if (w.sprite == null) continue;
 
-                        ship.writeMountWorldPosition(w.slot, tmpMountDraw);
-
-                        float rw = w.region.getRegionWidth();
-                        float rh = w.region.getRegionHeight();
-
-                        spriteBatch.draw(
-                            w.region,
-                            tmpMountDraw.x - rw / 2f,
-                            tmpMountDraw.y - rh / 2f,
-                            rw / 2f,
-                            rh / 2f,
-                            rw,
-                            rh,
-                            1f,
-                            1f,
-                            w.aimAngleDeg - 90f
-                        );
+                        w.sprite.setCenter(w.worldPosCache.x, w.worldPosCache.y);
+                        w.sprite.setRotation(w.aimAngleDeg);
+                        w.sprite.draw(spriteBatch);
                     }
                     spriteBatch.end();
 
@@ -362,7 +411,10 @@ public class GameWorld {
     public void dispose() {
         shapeRenderer.dispose();
         spriteBatch.dispose();
-        if (playerTexture != null) playerTexture.dispose();
+        for (Texture t : shipTextureCache.values()) {
+            if (t != null) t.dispose();
+        }
+        shipTextureCache.clear();
         for (Texture t : weaponTextureCache.values()) {
             if (t != null) t.dispose();
         }

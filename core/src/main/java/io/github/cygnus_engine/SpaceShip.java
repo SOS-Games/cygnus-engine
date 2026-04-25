@@ -1,7 +1,9 @@
 package io.github.cygnus_engine;
 
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Affine2;
 import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.graphics.g2d.Sprite;
 import com.badlogic.gdx.utils.Array;
 
 // todo:
@@ -97,8 +99,9 @@ public class SpaceShip extends GameObject {
     private boolean isVisible = true;
 
     private final Array<ShipWeaponInstance> weaponInstances = new Array<>();
-    private final Vector2 tmpSlotOffset = new Vector2();
+    private final Affine2 worldTransform = new Affine2();
     private float legacyFireCooldown = 0f;
+    private Sprite hullSprite;
 
     public enum Behavior {
         FLYING_TO_TARGET,
@@ -130,6 +133,7 @@ public class SpaceShip extends GameObject {
         float currentAngle = MathUtils.random(0f, 360f);
         this.targetAngle = currentAngle;
         setRotation(currentAngle);
+        refreshWorldTransformAndMountCaches();
     }
     
     @Override
@@ -142,6 +146,15 @@ public class SpaceShip extends GameObject {
         if (instances != null) {
             weaponInstances.addAll(instances);
         }
+        refreshWorldTransformAndMountCaches();
+    }
+
+    public void setHullSprite(Sprite hullSprite) {
+        this.hullSprite = hullSprite;
+    }
+
+    public Sprite getHullSprite() {
+        return hullSprite;
     }
 
     /** Apply hull AI tuning and combat movement style from mod ship JSON. */
@@ -180,6 +193,7 @@ public class SpaceShip extends GameObject {
 
     public void update(float deltaTime, ProjectileManager projectileManager) {
         legacyFireCooldown = Math.max(0f, legacyFireCooldown - deltaTime);
+        refreshWorldTransformAndMountCaches();
 
         switch (currentBehavior) {
             case WARPING_OUT:
@@ -209,6 +223,7 @@ public class SpaceShip extends GameObject {
 
         updateRotation(deltaTime);
         updatePosition(deltaTime);
+        refreshWorldTransformAndMountCaches();
     }
 
     private void updateWeaponAiming(float deltaTime, GameObject target) {
@@ -217,9 +232,8 @@ public class SpaceShip extends GameObject {
             w.fireCooldown = Math.max(0f, w.fireCooldown - deltaTime);
 
             if (w.slot.type == WeaponSlot.SlotType.TURRET && target != null) {
-                mountWorldOffset(w.slot, tmpSlotOffset);
-                float wx = getX() + tmpSlotOffset.x;
-                float wy = getY() + tmpSlotOffset.y;
+                float wx = w.worldPosCache.x;
+                float wy = w.worldPosCache.y;
                 float interceptX = target.getX();
                 float interceptY = target.getY();
                 if (target instanceof SpaceShip ts) {
@@ -265,12 +279,11 @@ public class SpaceShip extends GameObject {
             float aimDiff = Math.abs(CustomMathUtils.deltaDeg(w.aimAngleDeg, aimAngleForIntercept(w)));
             if (aimDiff > aimTolerance) continue;
 
-            mountWorldOffset(w.slot, tmpSlotOffset);
             float cos = MathUtils.cosDeg(w.aimAngleDeg);
             float sin = MathUtils.sinDeg(w.aimAngleDeg);
             float back = w.data.projectileRadius + 2f;
-            float spawnX = getX() + tmpSlotOffset.x + cos * back;
-            float spawnY = getY() + tmpSlotOffset.y + sin * back;
+            float spawnX = w.worldPosCache.x + cos * back;
+            float spawnY = w.worldPosCache.y + sin * back;
 
             if (homing) {
                 projectileManager.spawn(
@@ -321,9 +334,8 @@ public class SpaceShip extends GameObject {
 
     private float aimAngleForIntercept(ShipWeaponInstance w) {
         if (combatTarget == null || w.data == null) return getRotation();
-        mountWorldOffset(w.slot, tmpSlotOffset);
-        float wx = getX() + tmpSlotOffset.x;
-        float wy = getY() + tmpSlotOffset.y;
+        float wx = w.worldPosCache.x;
+        float wy = w.worldPosCache.y;
         float ix = combatTarget.getX();
         float iy = combatTarget.getY();
         if (combatTarget instanceof SpaceShip ts) {
@@ -337,14 +349,21 @@ public class SpaceShip extends GameObject {
         return CustomMathUtils.getAngleBetweenPoints(wx, wy, ix, iy);
     }
 
-    private void mountWorldOffset(WeaponSlot slot, Vector2 out) {
-        out.set(slot.x, slot.y).rotateDeg(getRotation());
-    }
-
     /** World position of a mount point for this frame (ship center + rotated slot offset). */
     public void writeMountWorldPosition(WeaponSlot slot, Vector2 out) {
-        mountWorldOffset(slot, out);
-        out.add(getX(), getY());
+        out.set(slot.x, slot.y);
+        worldTransform.applyTo(out);
+    }
+
+    public Affine2 getWorldTransform() {
+        return worldTransform;
+    }
+
+    private void refreshWorldTransformAndMountCaches() {
+        worldTransform.setToTrnRotScl(getX(), getY(), getRotation(), 1f, 1f);
+        for (ShipWeaponInstance weaponInstance : weaponInstances) {
+            weaponInstance.updateWorldPosition(worldTransform);
+        }
     }
 
     private static float rotateTowardDeg(float fromDeg, float toDeg, float maxStepDeg) {
