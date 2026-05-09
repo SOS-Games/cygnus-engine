@@ -2,14 +2,11 @@ package io.github.cygnus_engine;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
-import com.badlogic.gdx.math.Intersector;
-import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Pool;
 
 public class ProjectileManager {
     private final Array<Projectile> activeProjectiles = new Array<>();
-    private final Vector2 collisionCenter = new Vector2();
     private final Pool<Projectile> projectilePool = new Pool<>() {
         @Override
         protected Projectile newObject() {
@@ -80,12 +77,10 @@ public class ProjectileManager {
                         continue;
                     }
 
-                    float shipRadius = ship.getSize();
-                    boolean hit = Intersector.intersectSegmentCircle(
+                    boolean hit = ship.projectileIntersectsHull(
                         projectile.previousPosition,
                         projectile.position,
-                        collisionCenter.set(ship.getX(), ship.getY()),
-                        shipRadius * shipRadius
+                        projectile.radius
                     );
                     if (hit) {
                         projectile.alive = false;

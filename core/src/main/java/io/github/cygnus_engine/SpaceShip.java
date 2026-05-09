@@ -1,5 +1,6 @@
 package io.github.cygnus_engine;
 
+import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Affine2;
 import com.badlogic.gdx.math.Vector2;
@@ -99,7 +100,10 @@ public class SpaceShip extends GameObject {
     private boolean isVisible = true;
 
     private final Array<ShipWeaponInstance> weaponInstances = new Array<>();
+    /** Copy of hull {@link ShipData#colliders} for projectile and click hits. */
+    private final Array<ShipColliderCircle> collisionCircles = new Array<>();
     private final Affine2 worldTransform = new Affine2();
+    private final Vector2 collisionScratch = new Vector2();
     private float legacyFireCooldown = 0f;
     private Sprite hullSprite;
 
@@ -163,7 +167,15 @@ public class SpaceShip extends GameObject {
             return;
         }
         data.normalizeCombatProfile();
+        data.normalizeColliders();
         combatProfile = parseCombatProfile(data.combatProfile);
+
+        collisionCircles.clear();
+        if (data.colliders != null) {
+            for (ShipColliderCircle c : data.colliders) {
+                collisionCircles.add(new ShipColliderCircle(c.x, c.y, c.radius));
+            }
+        }
 
         // todo - these should be computed at runtime, not read from the json
         orbitCombatRadius = data.orbitCombatRadius;
@@ -171,6 +183,54 @@ public class SpaceShip extends GameObject {
         if (data.hullTurnDegPerSec > 0f) {
             maneuverability = data.hullTurnDegPerSec;
         }
+    }
+
+    /**
+     * Sweep test for a projectile capsule along {@code segStart}→{@code segEnd} against hull disks
+     * (radii inflated by {@code projectileRadius}).
+     */
+    public boolean projectileIntersectsHull(Vector2 segStart, Vector2 segEnd, float projectileRadius) {
+        refreshWorldTransformAndMountCaches();
+        float pr = projectileRadius;
+
+        if (collisionCircles.size > 0) {
+            for (int i = 0; i < collisionCircles.size; i++) {
+                ShipColliderCircle c = collisionCircles.get(i);
+                collisionScratch.set(c.x, c.y);
+                worldTransform.applyTo(collisionScratch);
+                float rr = c.radius + pr;
+                if (Intersector.intersectSegmentCircle(segStart, segEnd, collisionScratch, rr * rr)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        float shipRadius = getSize();
+        collisionScratch.set(getX(), getY());
+        float rr = shipRadius + pr;
+        return Intersector.intersectSegmentCircle(segStart, segEnd, collisionScratch, rr * rr);
+    }
+
+    @Override
+    public boolean containsPoint(float pointX, float pointY) {
+        refreshWorldTransformAndMountCaches();
+
+        if (collisionCircles.size > 0) {
+            for (int i = 0; i < collisionCircles.size; i++) {
+                ShipColliderCircle c = collisionCircles.get(i);
+                collisionScratch.set(c.x, c.y);
+                worldTransform.applyTo(collisionScratch);
+                float dx = pointX - collisionScratch.x;
+                float dy = pointY - collisionScratch.y;
+                if (dx * dx + dy * dy <= (double) c.radius * c.radius) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        return super.containsPoint(pointX, pointY);
     }
 
     private static CombatProfile parseCombatProfile(String raw) {

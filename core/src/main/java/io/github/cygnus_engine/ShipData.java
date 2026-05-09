@@ -51,9 +51,16 @@ public class ShipData {
     public List<WeaponSlot> weaponSlots = new ArrayList<>();
     
     public List<Vector2> enginePositions = new ArrayList<Vector2>();
-    
-    /** Polygon-like collider vertices relative to ship center. */
-    public List<Vector2> colliderVertices = new ArrayList<Vector2>();
+
+    /** Overlapping hit circles in hull-local space (same as mounts). See {@link ShipColliderCircle}. */
+    public List<ShipColliderCircle> colliders = new ArrayList<>();
+
+    public void normalizeColliders() {
+        if (colliders == null) {
+            colliders = new ArrayList<>();
+        }
+        colliders.removeIf(c -> c == null || !(c.radius > 0f));
+    }
 
     public void normalizeWeaponSlots() {
         if (weaponSlots == null) {

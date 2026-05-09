@@ -7,6 +7,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Dialog;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -38,7 +39,6 @@ public class ModdingScreen {
     private TextField maneuverField;
     private TextField cargoField;
     private TextButton symmetryButton;
-    private TextButton insertModeButton;
     private Label mountEditorInfoLabel;
     private TextButton slotTypeToggleButton;
     private TextButton equipWeaponButton;
@@ -226,20 +226,11 @@ public class ModdingScreen {
             }
         });
 
-        TextButton addColliderButton = new TextButton("Add Collider Vertex", skin);
+        TextButton addColliderButton = new TextButton("Add Collider Circle", skin);
         addColliderButton.addListener(new ChangeListener() {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
-                shipEditor.addColliderVertex();
-            }
-        });
-
-        insertModeButton = new TextButton(insertModeButtonText(), skin);
-        insertModeButton.addListener(new ChangeListener() {
-            @Override
-            public void changed(ChangeEvent event, Actor actor) {
-                shipEditor.setInsertModeEnabled(!shipEditor.isInsertModeEnabled());
-                insertModeButton.setText(insertModeButtonText());
+                shipEditor.addColliderCircle();
             }
         });
 
@@ -268,9 +259,19 @@ public class ModdingScreen {
         editorWindow.add(equipWeaponButton);
         editorWindow.add(addEngineButton);
         editorWindow.add(addColliderButton);
-        editorWindow.add(insertModeButton);
         editorWindow.add(symmetryButton);
         editorWindow.add(saveButton).right().row();
+
+        Table layerToggles = new Table(skin);
+        layerToggles.defaults().pad(4f).left();
+        layerToggles.add(new Label("Show:", skin)).padRight(10f);
+
+        layerToggles.add(makeLayerCheckbox("Bounds", true, shipEditor::setLayerBoundsVisible)).padRight(12f);
+        layerToggles.add(makeLayerCheckbox("Weapons", true, shipEditor::setLayerWeaponsVisible)).padRight(12f);
+        layerToggles.add(makeLayerCheckbox("Engines", true, shipEditor::setLayerEnginesVisible)).padRight(12f);
+        layerToggles.add(makeLayerCheckbox("COM", true, shipEditor::setLayerCenterOfMassVisible)).padRight(12f);
+        layerToggles.add(makeLayerCheckbox("Colliders", true, shipEditor::setLayerCollidersVisible));
+        editorWindow.add(layerToggles).left().colspan(8).padTop(6f).row();
 
         ShipData d = shipEditor.getShipData();
         speedField = new TextField(Float.toString(d.speed), skin);
@@ -294,7 +295,7 @@ public class ModdingScreen {
         editorWindow.add(mountEditorInfoLabel).left().width(720f).row();
 
         editorWindow.add(new Label("Mounts: red = turret, magenta = hardpoint. Drag mounts on the hull; select a mount to change type or equip a weapon from mods/*/weapons/*.json.", skin)).left().width(720f).row();
-        editorWindow.add(new Label("Collider: drag points; hovered points are yellow. Insert mode: click white-highlighted collider edges to add vertices.", skin)).left().width(720f).row();
+        editorWindow.add(new Label("Colliders: cyan circles — drag centers to move, drag circumference to resize. Symmetry duplicates paired circles.", skin)).left().width(720f).row();
 
         editorWindow.pack();
         editorWindow.setPosition(10f, Math.max(10f, stage.getHeight() - editorWindow.getHeight() - 10f));
@@ -323,8 +324,16 @@ public class ModdingScreen {
         return shipEditor.isSymmetryEnabled() ? "Symmetry: ON" : "Symmetry: OFF";
     }
 
-    private String insertModeButtonText() {
-        return shipEditor.isInsertModeEnabled() ? "Insert: ON" : "Insert: OFF";
+    private CheckBox makeLayerCheckbox(String title, boolean initial, java.util.function.Consumer<Boolean> onChange) {
+        CheckBox cb = new CheckBox(title, skin);
+        cb.setChecked(initial);
+        cb.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                onChange.accept(cb.isChecked());
+            }
+        });
+        return cb;
     }
 
     private void refreshMountEditorLabels() {

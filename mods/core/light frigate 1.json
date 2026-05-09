@@ -1,0 +1,10 @@
+{
+"id": "light frigate 1",
+"name": "light frigate 1",
+"texturePath": "mods/core/light frigate 1.png",
+"colliders": [
+	{
+		"radius": 16
+	}
+]
+}

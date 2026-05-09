@@ -35,6 +35,7 @@ public final class ShipDataIO {
 
         data.normalizeWeaponSlots();
         data.normalizeCombatProfile();
+        data.normalizeColliders();
 
         return data;
     }
@@ -53,6 +54,7 @@ public final class ShipDataIO {
         }
         data.normalizeWeaponSlots();
         data.normalizeCombatProfile();
+        data.normalizeColliders();
         return data;
     }
 

@@ -9,12 +9,12 @@ import com.badlogic.gdx.graphics.g2d.Sprite;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.graphics.Color;
-import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ObjectMap;
+
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,35 +32,48 @@ public class ShipEditor {
     private ShapeRenderer shapeRenderer;
     private OrthographicCamera camera;
 
-    private SpriteBatch spriteBatch; // For future use with textures and fonts
+    private SpriteBatch spriteBatch;
     private Texture shipTexture;
     private Sprite shipSprite;
 
     private ShipData shipData;
     private FileHandle shipTextureFile;
 
-    // Ship is always drawn centered; editor data is relative to center (0,0) in world space.
     private final Vector2 shipCenterWorld = new Vector2(WORLD_WIDTH / 2f, WORLD_HEIGHT / 2f);
 
-    // Drag state
-    private Vector2 selectedPoint = null; // COM / weapon / engine / collider vertex
+    private Vector2 selectedPoint = null; // COM / weapon / engine
     private PointOwner selectedPointOwner = PointOwner.NONE;
     private CornerHandle selectedCorner = CornerHandle.NONE;
     private final Vector2 tmp2 = new Vector2();
+
+    /** Editor overlay visibility — keeps the hull view uncluttered. */
+    private boolean layerBounds = true;
+    private boolean layerWeapons = true;
+    private boolean layerEngines = true;
+    private boolean layerCom = true;
+    private boolean layerColliders = true;
+
     private boolean symmetryEnabled = true;
-    private boolean insertModeEnabled = true;
     private final Vector2 hoveredMouseRel = new Vector2();
     private Vector2 hoveredPoint = null;
     private WeaponSlot hoveredWeaponSlot = null;
-    private int hoveredColliderEdgeIndex = -1;
-    private final Vector2 hoveredInsertPoint = new Vector2();
-    private final Map<Vector2, Vector2> colliderMirrorPairs = new IdentityHashMap<>();
+
+    /** Multi-circle collider authoring */
+    private ColliderPick hoveredColliderPick = ColliderPick.NONE;
+    private ShipColliderCircle hoveredColliderCircle = null;
+    private ShipColliderCircle selectedCollider = null;
+    private ColliderDragMode colliderDrag = ColliderDragMode.NONE;
+
+    private final Map<ShipColliderCircle, ShipColliderCircle> colliderMirrorPairs = new IdentityHashMap<>();
+
     private final Map<WeaponSlot, WeaponSlot> weaponMirrorPairs = new IdentityHashMap<>();
     private WeaponSlot selectedWeaponSlot;
     private final ObjectMap<String, Texture> weaponPreviewTextures = new ObjectMap<>();
 
     private enum CornerHandle { NONE, BL, BR, TL, TR }
-    private enum PointOwner { NONE, COM, WEAPON, ENGINE, COLLIDER }
+    private enum PointOwner { NONE, COM, WEAPON, ENGINE }
+    private enum ColliderPick { NONE, CENTER, EDGE }
+    private enum ColliderDragMode { NONE, CENTER, RADIUS_EDGE }
 
     private final InputAdapter input = new InputAdapter() {
         @Override
@@ -69,60 +82,76 @@ public class ShipEditor {
 
             Vector2 mouseRel = screenToShipRelative(screenX, screenY);
 
-            // 1) Corner handles for bounds
-            CornerHandle corner = pickBoundsCorner(mouseRel);
-            if (corner != CornerHandle.NONE) {
-                selectedWeaponSlot = null;
-                selectedCorner = corner;
-                return true;
+            if (layerBounds) {
+                CornerHandle corner = pickBoundsCorner(mouseRel);
+                if (corner != CornerHandle.NONE) {
+                    selectedWeaponSlot = null;
+                    selectedCollider = null;
+                    colliderDrag = ColliderDragMode.NONE;
+                    selectedCorner = corner;
+                    return true;
+                }
             }
 
-            // 2) Points: weapon slots
-            for (WeaponSlot slot : shipData.weaponSlots) {
-                if (mouseRel.dst(slot.x, slot.y) <= HANDLE_RADIUS) {
-                    selectedWeaponSlot = slot;
+            selectedCorner = CornerHandle.NONE;
+
+            if (layerWeapons) {
+                for (WeaponSlot slot : shipData.weaponSlots) {
+                    if (mouseRel.dst(slot.x, slot.y) <= HANDLE_RADIUS * zoomFactor()) {
+                        selectedWeaponSlot = slot;
+                        selectedPoint = null;
+                        selectedCollider = null;
+                        colliderDrag = ColliderDragMode.NONE;
+                        selectedPointOwner = PointOwner.WEAPON;
+                        return true;
+                    }
+                }
+            }
+            selectedWeaponSlot = null;
+
+            if (layerEngines) {
+                for (Vector2 pos : shipData.enginePositions) {
+                    if (mouseRel.dst(pos) <= HANDLE_RADIUS * zoomFactor()) {
+                        selectedPoint = pos;
+                        selectedCollider = null;
+                        colliderDrag = ColliderDragMode.NONE;
+                        selectedPointOwner = PointOwner.ENGINE;
+                        return true;
+                    }
+                }
+            }
+
+            if (layerColliders) {
+                ShipColliderCircle centerHit = pickColliderCenter(mouseRel);
+                if (centerHit != null) {
                     selectedPoint = null;
-                    selectedPointOwner = PointOwner.WEAPON;
+                    selectedCollider = centerHit;
+                    colliderDrag = ColliderDragMode.CENTER;
                     return true;
                 }
-            }
-            selectedWeaponSlot = null;
 
-            // 3) Points: engines
-            for (Vector2 pos : shipData.enginePositions) {
-                if (mouseRel.dst(pos) <= HANDLE_RADIUS) {
-                    selectedWeaponSlot = null;
-                    selectedPoint = pos;
-                    selectedPointOwner = PointOwner.ENGINE;
-                    return true;
-                }
-            }
-
-            // 4) Points: collider vertices
-            for (Vector2 v : shipData.colliderVertices) {
-                if (mouseRel.dst(v) <= HANDLE_RADIUS) {
-                    selectedWeaponSlot = null;
-                    selectedPoint = v;
-                    selectedPointOwner = PointOwner.COLLIDER;
+                ShipColliderCircle edgeHit = pickColliderEdge(mouseRel);
+                if (edgeHit != null) {
+                    selectedPoint = null;
+                    selectedCollider = edgeHit;
+                    colliderDrag = ColliderDragMode.RADIUS_EDGE;
                     return true;
                 }
             }
 
-            // 5) Center of mass
-            if (mouseRel.dst(shipData.centerOfMass) <= HANDLE_RADIUS) {
-                selectedWeaponSlot = null;
-                selectedPoint = shipData.centerOfMass;
-                selectedPointOwner = PointOwner.COM;
-                return true;
+            selectedCollider = null;
+            colliderDrag = ColliderDragMode.NONE;
+
+            if (layerCom) {
+                if (mouseRel.dst(shipData.centerOfMass) <= HANDLE_RADIUS * zoomFactor()) {
+                    selectedPoint = shipData.centerOfMass;
+                    selectedPointOwner = PointOwner.COM;
+                    return true;
+                }
             }
 
-            // 6) Insert into collider edge in insert mode.
-            if (insertModeEnabled && tryInsertColliderVertex(mouseRel)) {
-                selectedWeaponSlot = null;
-                return true;
-            }
-
-            selectedWeaponSlot = null;
+            selectedPoint = null;
+            selectedPointOwner = PointOwner.NONE;
             return false;
         }
 
@@ -131,7 +160,11 @@ public class ShipEditor {
             if (shipData == null) return false;
 
             boolean draggingWeapon = selectedWeaponSlot != null && selectedPointOwner == PointOwner.WEAPON;
-            if (selectedCorner == CornerHandle.NONE && selectedPoint == null && !draggingWeapon) return false;
+            boolean draggingCollider = selectedCollider != null && colliderDrag != ColliderDragMode.NONE;
+
+            if (selectedCorner == CornerHandle.NONE && selectedPoint == null && !draggingWeapon && !draggingCollider) {
+                return false;
+            }
 
             Vector2 mouseRel = screenToShipRelative(screenX, screenY);
             snap(mouseRel);
@@ -149,17 +182,39 @@ public class ShipEditor {
                 return true;
             }
 
+            if (draggingCollider) {
+                ShipColliderCircle c = selectedCollider;
+                if (colliderDrag == ColliderDragMode.CENTER) {
+                    c.x = mouseRel.x;
+                    c.y = mouseRel.y;
+                    if (symmetryEnabled) {
+                        ShipColliderCircle mirror = colliderMirrorPairs.get(c);
+                        if (mirror != null) {
+                            mirror.x = -c.x;
+                            mirror.y = c.y;
+                        }
+                    }
+                } else if (colliderDrag == ColliderDragMode.RADIUS_EDGE) {
+                    float newR = Math.max(GRID_SIZE, Math.round(mouseRel.dst(c.x, c.y)));
+                    c.radius = newR;
+                    if (symmetryEnabled) {
+                        ShipColliderCircle mirror = colliderMirrorPairs.get(c);
+                        if (mirror != null) {
+                            mirror.radius = newR;
+                        }
+                    }
+                }
+                return true;
+            }
+
             if (selectedPoint != null) {
                 selectedPoint.set(mouseRel);
                 if (symmetryEnabled && selectedPointOwner != PointOwner.COM) {
                     List<Vector2> ownerList = switch (selectedPointOwner) {
                         case ENGINE -> shipData.enginePositions;
-                        case COLLIDER -> shipData.colliderVertices;
                         default -> null;
                     };
-                    Vector2 mirror = selectedPointOwner == PointOwner.COLLIDER
-                        ? colliderMirrorPairs.get(selectedPoint)
-                        : findMirrorPoint(ownerList, selectedPoint);
+                    Vector2 mirror = findMirrorPoint(ownerList, selectedPoint);
                     if (mirror != null) {
                         mirror.set(-selectedPoint.x, selectedPoint.y);
                     }
@@ -182,6 +237,8 @@ public class ShipEditor {
             selectedPoint = null;
             selectedPointOwner = PointOwner.NONE;
             selectedCorner = CornerHandle.NONE;
+            selectedCollider = null;
+            colliderDrag = ColliderDragMode.NONE;
             updateHoverState(screenX, screenY);
             return false;
         }
@@ -204,22 +261,42 @@ public class ShipEditor {
             return true;
         }
     };
-    
+
     public ShipEditor() {
         shapeRenderer = new ShapeRenderer();
         camera = new OrthographicCamera(WORLD_WIDTH, WORLD_HEIGHT);
         camera.setToOrtho(false, WORLD_WIDTH, WORLD_HEIGHT);
         camera.position.set(WORLD_WIDTH / 2f, WORLD_HEIGHT / 2f, 0);
         camera.update();
-        
+
         spriteBatch = new SpriteBatch();
         spriteBatch.setProjectionMatrix(camera.combined);
+    }
 
-        // Start with no ship loaded; ModdingScreen will call loadShip(...).
-    };
+    public void update(float deltaTime) {}
 
-    public void update(float deltaTime) {
-        
+    private float zoomFactor() {
+        return Math.max(1f, camera.zoom);
+    }
+
+    public void setLayerBoundsVisible(boolean v) {
+        layerBounds = v;
+    }
+
+    public void setLayerWeaponsVisible(boolean v) {
+        layerWeapons = v;
+    }
+
+    public void setLayerEnginesVisible(boolean v) {
+        layerEngines = v;
+    }
+
+    public void setLayerCenterOfMassVisible(boolean v) {
+        layerCom = v;
+    }
+
+    public void setLayerCollidersVisible(boolean v) {
+        layerColliders = v;
     }
 
     public void render() {
@@ -228,7 +305,6 @@ public class ShipEditor {
         spriteBatch.setProjectionMatrix(camera.combined);
         spriteBatch.begin();
 
-        // Draw ship centered in the world.
         float w = shipTexture.getWidth();
         float h = shipTexture.getHeight();
         shipSprite.setSize(w, h);
@@ -237,7 +313,9 @@ public class ShipEditor {
         shipSprite.setPosition(shipCenterWorld.x - w / 2f, shipCenterWorld.y - h / 2f);
         shipSprite.draw(spriteBatch);
 
-        drawWeaponSlotPreviews(spriteBatch);
+        if (layerWeapons) {
+            drawWeaponSlotPreviews(spriteBatch);
+        }
 
         spriteBatch.end();
 
@@ -245,22 +323,17 @@ public class ShipEditor {
     }
 
     public void resize(int width, int height) {
-        // Maintain aspect ratio and fixed world size
         float aspectRatio = (float) width / (float) height;
         float worldAspectRatio = WORLD_WIDTH / WORLD_HEIGHT;
-        
-        // using width/height keeps shapes the same size instead of stretching like it would with WORLD_WIDTH / WORLD_HEIGHT
+
         if (aspectRatio > worldAspectRatio) {
-            // Window is wider - fit to height
             camera.viewportHeight = height;
             camera.viewportWidth = height * aspectRatio;
         } else {
-            // Window is taller - fit to width
             camera.viewportWidth = width;
             camera.viewportHeight = width / aspectRatio;
         }
-        
-        // this keeps the same position on the screen, and won't jump the camera up and right like it would if we used screen width/height
+
         camera.position.set(WORLD_WIDTH / 2f, WORLD_HEIGHT / 2f, 0);
 
         camera.update();
@@ -299,7 +372,7 @@ public class ShipEditor {
         shipTexture = new Texture(textureFile);
         shipTexture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
         shipSprite = new Sprite(shipTexture);
-        ensureDefaultCollider();
+        ensureDefaultColliders();
         rebuildColliderMirrorPairs();
         rebuildWeaponMirrorPairs();
 
@@ -341,34 +414,24 @@ public class ShipEditor {
         addPointWithOptionalMirror(shipData.enginePositions, new Vector2(0, 0));
     }
 
-    public void addColliderVertex() {
+    public void addColliderCircle() {
         if (shipData == null) return;
-        ensureDefaultCollider();
-        if (insertModeEnabled && hoveredColliderEdgeIndex >= 0) {
-            Vector2 insert = new Vector2(hoveredInsertPoint);
-            snap(insert);
-            insertColliderVertexAt(hoveredColliderEdgeIndex, insert);
-            return;
-        }
-        // Fallback button behavior when not hovering an edge: add on right side midpoint.
+        ensureCollidersNonNull();
+
         Rectangle b = shipData.bounds;
-        Vector2 insert = new Vector2(Math.abs(b.x + b.width), 0f);
-        snap(insert);
-        shipData.colliderVertices.add(insert);
-        if (symmetryEnabled && !MathUtils.isEqual(insert.x, 0f, 0.001f)) {
-            Vector2 mirror = new Vector2(-insert.x, insert.y);
-            shipData.colliderVertices.add(mirror);
-            colliderMirrorPairs.put(insert, mirror);
-            colliderMirrorPairs.put(mirror, insert);
+        float rr = Math.max(6f, 0.2f * Math.min(b.width, b.height));
+        float cx = rr + GRID_SIZE;
+        float cy = b.y + b.height * 0.5f;
+
+        ShipColliderCircle primary = new ShipColliderCircle(cx, cy, rr);
+        shipData.colliders.add(primary);
+
+        if (symmetryEnabled && !MathUtils.isEqual(primary.x, 0f, 0.5f)) {
+            ShipColliderCircle mirror = new ShipColliderCircle(-primary.x, primary.y, primary.radius);
+            shipData.colliders.add(mirror);
+            colliderMirrorPairs.put(primary, mirror);
+            colliderMirrorPairs.put(mirror, primary);
         }
-    }
-
-    public void setInsertModeEnabled(boolean enabled) {
-        this.insertModeEnabled = enabled;
-    }
-
-    public boolean isInsertModeEnabled() {
-        return insertModeEnabled;
     }
 
     public void setSymmetryEnabled(boolean enabled) {
@@ -385,9 +448,6 @@ public class ShipEditor {
 
         Vector3 clickedPos = new Vector3(screenX, screenY, 0);
         Vector3 tmp3 = camera.unproject(clickedPos, 0.0f, 0.0f, clientX, clientY);
-
-        // don't use viewport.unproject because it returns NaN for tmp3.x and tmp3.y
-        //viewport.unproject(tmp3.set(screenX, screenY, 0));
 
         float worldX = tmp3.x;
         float worldY = tmp3.y;
@@ -407,11 +467,37 @@ public class ShipEditor {
         Vector2 tl = new Vector2(b.x, b.y + b.height);
         Vector2 tr = new Vector2(b.x + b.width, b.y + b.height);
 
-        if (mouseRel.dst(bl) <= HANDLE_RADIUS) return CornerHandle.BL;
-        if (mouseRel.dst(br) <= HANDLE_RADIUS) return CornerHandle.BR;
-        if (mouseRel.dst(tl) <= HANDLE_RADIUS) return CornerHandle.TL;
-        if (mouseRel.dst(tr) <= HANDLE_RADIUS) return CornerHandle.TR;
+        float z = HANDLE_RADIUS * zoomFactor();
+        if (mouseRel.dst(bl) <= z) return CornerHandle.BL;
+        if (mouseRel.dst(br) <= z) return CornerHandle.BR;
+        if (mouseRel.dst(tl) <= z) return CornerHandle.TL;
+        if (mouseRel.dst(tr) <= z) return CornerHandle.TR;
         return CornerHandle.NONE;
+    }
+
+    private ShipColliderCircle pickColliderCenter(Vector2 mouseRel) {
+        float z = HANDLE_RADIUS * zoomFactor();
+        for (ShipColliderCircle c : shipData.colliders) {
+            if (mouseRel.dst(c.x, c.y) <= z) return c;
+        }
+        return null;
+    }
+
+    private ShipColliderCircle pickColliderEdge(Vector2 mouseRel) {
+        float z = HANDLE_RADIUS * zoomFactor();
+        float edgeTol = 10f * zoomFactor();
+        float bestErr = Float.MAX_VALUE;
+        ShipColliderCircle best = null;
+        for (ShipColliderCircle c : shipData.colliders) {
+            float d = mouseRel.dst(c.x, c.y);
+            if (d <= z + 2f) continue;
+            float err = Math.abs(d - c.radius);
+            if (err <= edgeTol && err < bestErr) {
+                bestErr = err;
+                best = c;
+            }
+        }
+        return best;
     }
 
     private void resizeBoundsFromCorner(Vector2 mouseRel, CornerHandle corner) {
@@ -429,7 +515,6 @@ public class ShipEditor {
             default -> {}
         }
 
-        // Normalize so width/height stay positive.
         float newLeft = Math.min(left, right);
         float newRight = Math.max(left, right);
         float newBottom = Math.min(bottom, top);
@@ -447,67 +532,40 @@ public class ShipEditor {
         points.add(new Vector2(-point.x, point.y));
     }
 
-    private void ensureDefaultCollider() {
+    private void ensureCollidersNonNull() {
+        if (shipData.colliders == null) shipData.colliders = new java.util.ArrayList<>();
+    }
+
+    private void ensureDefaultColliders() {
         if (shipData == null || shipTexture == null) return;
-        if (shipData.colliderVertices != null && shipData.colliderVertices.size() >= 3) return;
+        ensureCollidersNonNull();
+        shipData.normalizeColliders();
+        if (!shipData.colliders.isEmpty()) return;
+
         float halfW = shipTexture.getWidth() / 2f;
         float halfH = shipTexture.getHeight() / 2f;
-        shipData.colliderVertices.clear();
-        shipData.colliderVertices.add(new Vector2(halfW, halfH));
-        shipData.colliderVertices.add(new Vector2(halfW, -halfH));
-        shipData.colliderVertices.add(new Vector2(-halfW, -halfH));
-        shipData.colliderVertices.add(new Vector2(-halfW, halfH));
+        float r = Math.max(8f, 0.45f * Math.min(halfW, halfH));
+        shipData.colliders.add(new ShipColliderCircle(0f, 0f, r));
     }
 
     private void rebuildColliderMirrorPairs() {
         colliderMirrorPairs.clear();
-        if (shipData == null) return;
-        List<Vector2> vertices = shipData.colliderVertices;
-        for (int i = 0; i < vertices.size(); i++) {
-            Vector2 a = vertices.get(i);
+        if (shipData == null || shipData.colliders == null) return;
+        List<ShipColliderCircle> list = shipData.colliders;
+        for (int i = 0; i < list.size(); i++) {
+            ShipColliderCircle a = list.get(i);
             if (colliderMirrorPairs.containsKey(a)) continue;
-            for (int j = i + 1; j < vertices.size(); j++) {
-                Vector2 b = vertices.get(j);
-                if (MathUtils.isEqual(a.x, -b.x, 0.1f) && MathUtils.isEqual(a.y, b.y, 0.1f)) {
+            for (int j = i + 1; j < list.size(); j++) {
+                ShipColliderCircle b = list.get(j);
+                if (MathUtils.isEqual(a.x, -b.x, 0.75f)
+                    && MathUtils.isEqual(a.y, b.y, 0.75f)
+                    && MathUtils.isEqual(a.radius, b.radius, 0.75f)) {
                     colliderMirrorPairs.put(a, b);
                     colliderMirrorPairs.put(b, a);
                     break;
                 }
             }
         }
-    }
-
-    private boolean tryInsertColliderVertex(Vector2 mouseRel) {
-        if (shipData.colliderVertices.size() < 2) return false;
-        int edgeIndex = findHoveredColliderEdgeIndex(mouseRel);
-        if (edgeIndex < 0) return false;
-        Vector2 insert = new Vector2(hoveredInsertPoint);
-        snap(insert);
-        insertColliderVertexAt(edgeIndex, insert);
-        return true;
-    }
-
-    private void insertColliderVertexAt(int edgeIndex, Vector2 insert) {
-        List<Vector2> vertices = shipData.colliderVertices;
-        Vector2 primary = new Vector2(insert);
-        int insertAt = edgeIndex + 1;
-        vertices.add(insertAt, primary);
-        selectedPoint = primary;
-        selectedPointOwner = PointOwner.COLLIDER;
-
-        if (symmetryEnabled && !MathUtils.isEqual(primary.x, 0f, 0.001f)) {
-            int mirroredEdge = mirrorEdgeIndex(edgeIndex, vertices.size() - 1);
-            int mirrorInsertAt = mirroredEdge + 1;
-            if (mirrorInsertAt == insertAt) mirrorInsertAt++;
-            Vector2 mirror = new Vector2(-primary.x, primary.y);
-            vertices.add(Math.min(mirrorInsertAt, vertices.size()), mirror);
-            colliderMirrorPairs.put(primary, mirror);
-            colliderMirrorPairs.put(mirror, primary);
-        }
-    }
-
-    private int mirrorEdgeIndex(int edgeIndex, int originalSize) {
-        return (originalSize - 1 - edgeIndex + originalSize) % originalSize;
     }
 
     private Vector2 findMirrorPoint(List<Vector2> points, Vector2 original) {
@@ -522,136 +580,122 @@ public class ShipEditor {
     }
 
     private void updateHoverState(int screenX, int screenY) {
-        Vector2 mouseRel = screenToShipRelative(screenX, screenY);
-        hoveredMouseRel.set(mouseRel);
+        hoveredMouseRel.set(screenToShipRelative(screenX, screenY));
+
         hoveredPoint = null;
-        hoveredColliderEdgeIndex = -1;
-
-        float pointSearchRadius = HANDLE_RADIUS * Math.max(1f, camera.zoom);
-
+        hoveredColliderPick = ColliderPick.NONE;
+        hoveredColliderCircle = null;
         hoveredWeaponSlot = null;
-        for (WeaponSlot slot : shipData.weaponSlots) {
-            if (mouseRel.dst(slot.x, slot.y) <= pointSearchRadius) {
-                hoveredWeaponSlot = slot;
-                return;
+
+        float pointSearchRadius = HANDLE_RADIUS * zoomFactor();
+
+        if (layerWeapons) {
+            for (WeaponSlot slot : shipData.weaponSlots) {
+                if (hoveredMouseRel.dst(slot.x, slot.y) <= pointSearchRadius) {
+                    hoveredWeaponSlot = slot;
+                    return;
+                }
             }
         }
-        for (Vector2 pos : shipData.enginePositions) {
-            if (mouseRel.dst(pos) <= pointSearchRadius) {
-                hoveredPoint = pos;
-                return;
+        if (layerEngines) {
+            for (Vector2 pos : shipData.enginePositions) {
+                if (hoveredMouseRel.dst(pos) <= pointSearchRadius) {
+                    hoveredPoint = pos;
+                    return;
+                }
             }
-        }
-        for (Vector2 v : shipData.colliderVertices) {
-            if (mouseRel.dst(v) <= pointSearchRadius) {
-                hoveredPoint = v;
-                return;
-            }
-        }
-        if (mouseRel.dst(shipData.centerOfMass) <= pointSearchRadius) {
-            hoveredPoint = shipData.centerOfMass;
-            return;
         }
 
-        if (insertModeEnabled) {
-            hoveredColliderEdgeIndex = findHoveredColliderEdgeIndex(mouseRel);
-        }
-    }
-
-    private int findHoveredColliderEdgeIndex(Vector2 mouseRel) {
-        List<Vector2> vertices = shipData.colliderVertices;
-        if (vertices.size() < 2) return -1;
-        float threshold = HANDLE_RADIUS * Math.max(1f, camera.zoom);
-        float bestDistance = Float.MAX_VALUE;
-        int bestIndex = -1;
-        Vector2 bestPoint = null;
-        for (int i = 0; i < vertices.size(); i++) {
-            Vector2 p1 = vertices.get(i);
-            Vector2 p2 = vertices.get((i + 1) % vertices.size());
-            float d = Intersector.distanceSegmentPoint(p1, p2, mouseRel);
-            if (d <= threshold && d < bestDistance) {
-                bestDistance = d;
-                bestIndex = i;
-                if (bestPoint == null) bestPoint = new Vector2();
-                Intersector.nearestSegmentPoint(p1, p2, mouseRel, bestPoint);
+        if (layerColliders) {
+            ShipColliderCircle cCenter = pickColliderCenter(hoveredMouseRel);
+            if (cCenter != null) {
+                hoveredColliderPick = ColliderPick.CENTER;
+                hoveredColliderCircle = cCenter;
+                return;
+            }
+            ShipColliderCircle cEdge = pickColliderEdge(hoveredMouseRel);
+            if (cEdge != null) {
+                hoveredColliderPick = ColliderPick.EDGE;
+                hoveredColliderCircle = cEdge;
+                return;
             }
         }
-        if (bestIndex >= 0 && bestPoint != null) {
-            hoveredInsertPoint.set(bestPoint);
+
+        if (layerCom) {
+            if (hoveredMouseRel.dst(shipData.centerOfMass) <= pointSearchRadius) {
+                hoveredPoint = shipData.centerOfMass;
+            }
         }
-        return bestIndex;
     }
 
     private void drawOverlays() {
         shapeRenderer.setProjectionMatrix(camera.combined);
-
-        // Convert relative -> world by adding shipCenterWorld
-        shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
-        shapeRenderer.setColor(Color.GREEN);
         Rectangle b = shipData.bounds;
-        shapeRenderer.rect(shipCenterWorld.x + b.x, shipCenterWorld.y + b.y, b.width, b.height);
 
-        // Collider polygon
-        shapeRenderer.setColor(Color.CYAN);
-        if (shipData.colliderVertices.size() >= 2) {
-            for (int i = 0; i < shipData.colliderVertices.size(); i++) {
-                Vector2 current = shipData.colliderVertices.get(i);
-                Vector2 next = shipData.colliderVertices.get((i + 1) % shipData.colliderVertices.size());
-                if (i == hoveredColliderEdgeIndex && insertModeEnabled) {
-                    shapeRenderer.setColor(Color.WHITE);
-                } else {
-                    shapeRenderer.setColor(Color.CYAN);
-                }
-                shapeRenderer.line(
-                    shipCenterWorld.x + current.x,
-                    shipCenterWorld.y + current.y,
-                    shipCenterWorld.x + next.x,
-                    shipCenterWorld.y + next.y
-                );
-            }
+        float circleRadius = 4f * camera.zoom;
+
+        if (layerBounds) {
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+            shapeRenderer.setColor(Color.GREEN);
+            shapeRenderer.rect(shipCenterWorld.x + b.x, shipCenterWorld.y + b.y, b.width, b.height);
+            shapeRenderer.end();
+
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+            shapeRenderer.setColor(Color.GREEN);
+            shapeRenderer.circle(shipCenterWorld.x + b.x, shipCenterWorld.y + b.y, circleRadius);
+            shapeRenderer.circle(shipCenterWorld.x + b.x + b.width, shipCenterWorld.y + b.y, circleRadius);
+            shapeRenderer.circle(shipCenterWorld.x + b.x, shipCenterWorld.y + b.y + b.height, circleRadius);
+            shapeRenderer.circle(shipCenterWorld.x + b.x + b.width, shipCenterWorld.y + b.y + b.height, circleRadius);
+            shapeRenderer.end();
         }
-        shapeRenderer.end();
+
+        if (layerColliders) {
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+            shapeRenderer.setColor(Color.CYAN);
+            for (ShipColliderCircle c : shipData.colliders) {
+                boolean hl = hoveredColliderCircle == c
+                    || hoveredColliderPick != ColliderPick.NONE && hoveredColliderCircle == c;
+                shapeRenderer.setColor(hl ? Color.WHITE : Color.CYAN);
+                shapeRenderer.circle(shipCenterWorld.x + c.x, shipCenterWorld.y + c.y, c.radius);
+            }
+            shapeRenderer.end();
+
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+            shapeRenderer.setColor(Color.CYAN);
+            for (ShipColliderCircle c : shipData.colliders) {
+                float pr = hoveredColliderPick == ColliderPick.CENTER && hoveredColliderCircle == c ? circleRadius * 1.5f : circleRadius;
+                shapeRenderer.circle(shipCenterWorld.x + c.x, shipCenterWorld.y + c.y, pr);
+            }
+            shapeRenderer.end();
+        }
 
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
 
-        // set circle radius based on zoom level
-        float circleRadius = 4f * camera.zoom;
-
-        // Weapon slots
-        for (WeaponSlot slot : shipData.weaponSlots) {
-            if (slot.type == WeaponSlot.SlotType.HARDPOINT) {
-                shapeRenderer.setColor(Color.MAGENTA);
-            } else {
-                shapeRenderer.setColor(Color.RED);
+        if (layerWeapons) {
+            for (WeaponSlot slot : shipData.weaponSlots) {
+                if (slot.type == WeaponSlot.SlotType.HARDPOINT) {
+                    shapeRenderer.setColor(Color.MAGENTA);
+                } else {
+                    shapeRenderer.setColor(Color.RED);
+                }
+                shapeRenderer.circle(shipCenterWorld.x + slot.x, shipCenterWorld.y + slot.y, circleRadius);
             }
-            shapeRenderer.circle(shipCenterWorld.x + slot.x, shipCenterWorld.y + slot.y, circleRadius);
         }
 
-        // Engines
-        shapeRenderer.setColor(Color.ORANGE);
-        for (Vector2 pos : shipData.enginePositions) {
-            shapeRenderer.circle(shipCenterWorld.x + pos.x, shipCenterWorld.y + pos.y, circleRadius);
+        if (layerEngines) {
+            shapeRenderer.setColor(Color.ORANGE);
+            for (Vector2 pos : shipData.enginePositions) {
+                shapeRenderer.circle(shipCenterWorld.x + pos.x, shipCenterWorld.y + pos.y, circleRadius);
+            }
         }
 
-        // Collider handles
-        shapeRenderer.setColor(Color.CYAN);
-        for (Vector2 v : shipData.colliderVertices) {
-            shapeRenderer.circle(shipCenterWorld.x + v.x, shipCenterWorld.y + v.y, circleRadius);
+        if (layerCom) {
+            shapeRenderer.setColor(Color.BLUE);
+            shapeRenderer.circle(shipCenterWorld.x + shipData.centerOfMass.x, shipCenterWorld.y + shipData.centerOfMass.y, circleRadius);
         }
 
-        // Center of mass
-        shapeRenderer.setColor(Color.BLUE);
-        shapeRenderer.circle(shipCenterWorld.x + shipData.centerOfMass.x, shipCenterWorld.y + shipData.centerOfMass.y, circleRadius);
-
-        // Bounds corners as handles
-        shapeRenderer.setColor(Color.GREEN);
-        shapeRenderer.circle(shipCenterWorld.x + b.x, shipCenterWorld.y + b.y, circleRadius);
-        shapeRenderer.circle(shipCenterWorld.x + b.x + b.width, shipCenterWorld.y + b.y, circleRadius);
-        shapeRenderer.circle(shipCenterWorld.x + b.x, shipCenterWorld.y + b.y + b.height, circleRadius);
-        shapeRenderer.circle(shipCenterWorld.x + b.x + b.width, shipCenterWorld.y + b.y + b.height, circleRadius);
-
-        // Hover state + insert ghost indicator.
-        if (hoveredWeaponSlot != null) {
+        // Hover halo
+        if (hoveredWeaponSlot != null && layerWeapons) {
             shapeRenderer.setColor(Color.YELLOW);
             float hoverRadius = circleRadius * 1.6f;
             shapeRenderer.circle(
@@ -662,14 +706,18 @@ public class ShipEditor {
         } else if (hoveredPoint != null) {
             shapeRenderer.setColor(Color.YELLOW);
             float hoverRadius = circleRadius * 1.6f;
-            shapeRenderer.circle(shipCenterWorld.x + hoveredPoint.x, shipCenterWorld.y + hoveredPoint.y, hoverRadius);
-        } else if (insertModeEnabled && hoveredColliderEdgeIndex >= 0) {
-            shapeRenderer.setColor(Color.WHITE);
             shapeRenderer.circle(
-                shipCenterWorld.x + hoveredInsertPoint.x,
-                shipCenterWorld.y + hoveredInsertPoint.y,
-                circleRadius * 1.35f
+                shipCenterWorld.x + hoveredPoint.x,
+                shipCenterWorld.y + hoveredPoint.y,
+                hoverRadius
             );
+        } else if (hoveredColliderCircle != null && layerColliders && hoveredColliderPick == ColliderPick.EDGE) {
+            shapeRenderer.setColor(Color.WHITE);
+            tmp2.set(hoveredMouseRel.x - hoveredColliderCircle.x, hoveredMouseRel.y - hoveredColliderCircle.y);
+            float angle = tmp2.angleDeg();
+            float rx = hoveredColliderCircle.x + MathUtils.cosDeg(angle) * hoveredColliderCircle.radius;
+            float ry = hoveredColliderCircle.y + MathUtils.sinDeg(angle) * hoveredColliderCircle.radius;
+            shapeRenderer.circle(shipCenterWorld.x + rx, shipCenterWorld.y + ry, circleRadius * 1.2f);
         }
 
         shapeRenderer.end();
