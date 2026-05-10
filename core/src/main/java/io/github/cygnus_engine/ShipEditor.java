@@ -4,6 +4,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Sprite;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
@@ -300,7 +301,7 @@ public class ShipEditor {
     }
 
     public void render() {
-        if (shipData == null || shipTexture == null) return;
+        if (shipData == null || shipTexture == null || shipSprite == null) return;
 
         spriteBatch.setProjectionMatrix(camera.combined);
         spriteBatch.begin();
@@ -341,7 +342,7 @@ public class ShipEditor {
     }
 
     public void dispose() {
-        if (shipTexture != null) shipTexture.dispose();
+        disposeHullTexture();
         clearWeaponPreviewTextures();
         if (spriteBatch != null) spriteBatch.dispose();
         if (shapeRenderer != null) shapeRenderer.dispose();
@@ -359,24 +360,88 @@ public class ShipEditor {
         return shipTextureFile;
     }
 
-    public void loadShip(FileHandle textureFile) {
-        if (textureFile == null || !textureFile.exists()) {
-            throw new IllegalArgumentException("Texture file must exist");
+    /**
+     * Load hull definition from a ship JSON file (e.g. {@code mods/core/fighter.json}) and the texture
+     * referenced by {@link ShipData#texturePath}, or a placeholder when the file is missing.
+     */
+    public void loadShipFromDefinition(FileHandle jsonFile) {
+        if (jsonFile == null || !jsonFile.exists()) {
+            throw new IllegalArgumentException("Ship JSON must exist");
         }
-
-        this.shipTextureFile = textureFile;
         clearWeaponPreviewTextures();
-        this.shipData = ShipDataIO.loadOrCreateDefault(textureFile);
-
-        if (shipTexture != null) shipTexture.dispose();
-        shipTexture = new Texture(textureFile);
-        shipTexture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
-        shipSprite = new Sprite(shipTexture);
+        shipData = ShipDataIO.loadFromJson(jsonFile);
+        if (shipData == null) {
+            throw new IllegalStateException("Failed to parse ship JSON: " + jsonFile.path());
+        }
+        reloadHullTexture();
         ensureDefaultColliders();
         rebuildColliderMirrorPairs();
         rebuildWeaponMirrorPairs();
+        Gdx.app.log("ShipEditor", "Loaded ship JSON: " + jsonFile.path());
+    }
 
-        Gdx.app.log("ShipEditor", "Loaded ship texture: " + textureFile.path());
+    /** Reload hull image from current {@link ShipData#texturePath} (after user picks a new PNG). */
+    public void reloadHullTextureFromShipData() {
+        if (shipData == null) return;
+        reloadHullTexture();
+        ensureDefaultColliders();
+        rebuildColliderMirrorPairs();
+    }
+
+    private void reloadHullTexture() {
+        disposeHullTexture();
+        FileHandle resolved = resolveHullTextureFile();
+        if (resolved != null && resolved.exists()) {
+            shipTexture = new Texture(resolved);
+            shipTexture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+            shipTextureFile = resolved;
+        } else {
+            shipTexture = createPlaceholderHullTexture();
+            shipTextureFile = null;
+        }
+        shipSprite = new Sprite(shipTexture);
+    }
+
+    private FileHandle resolveHullTextureFile() {
+        if (shipData == null || shipData.texturePath == null || shipData.texturePath.isBlank()) {
+            return null;
+        }
+        FileHandle local = Gdx.files.local(shipData.texturePath);
+        if (local.exists()) {
+            return local;
+        }
+        FileHandle internal = Gdx.files.internal(shipData.texturePath);
+        if (internal.exists()) {
+            return internal;
+        }
+        return local;
+    }
+
+    private void disposeHullTexture() {
+        if (shipTexture != null) {
+            shipTexture.dispose();
+            shipTexture = null;
+        }
+        shipSprite = null;
+        shipTextureFile = null;
+    }
+
+    private static Texture createPlaceholderHullTexture() {
+        Pixmap pm = new Pixmap(64, 64, Pixmap.Format.RGB888);
+        pm.setColor(0.42f, 0.42f, 0.46f, 1f);
+        pm.fill();
+        pm.setColor(0.28f, 0.28f, 0.32f, 1f);
+        for (int x = 0; x < 64; x += 8) {
+            for (int y = 0; y < 64; y += 8) {
+                if (((x / 8) + (y / 8)) % 2 == 0) {
+                    pm.fillRectangle(x, y, 8, 8);
+                }
+            }
+        }
+        Texture t = new Texture(pm);
+        pm.dispose();
+        t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        return t;
     }
 
     public WeaponSlot getSelectedWeaponSlot() {

@@ -5,9 +5,9 @@ import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Dialog;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
-import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -16,6 +16,8 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.ui.Window;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 public class ModdingScreen {
@@ -28,13 +30,22 @@ public class ModdingScreen {
     private Stage stage;
     private Skin skin;
 
-    private enum Mode { LIST, EDIT }
+    private enum Mode { LIST, EDIT_SHIP, EDIT_WEAPON }
+    private enum ListTab { SHIPS, WEAPONS }
+
     private Mode mode = Mode.LIST;
+    private ListTab listTab = ListTab.SHIPS;
 
     private Window listWindow;
     private Window editorWindow;
+    private Window weaponEditorWindow;
 
-    // Editor UI fields (simple v1)
+    private Table listInnerTable;
+
+    private FileHandle editingShipJson;
+    private FileHandle editingWeaponJson;
+    private WeaponData editingWeapon;
+
     private TextField speedField;
     private TextField maneuverField;
     private TextField cargoField;
@@ -43,6 +54,19 @@ public class ModdingScreen {
     private TextButton slotTypeToggleButton;
     private TextButton equipWeaponButton;
 
+    private TextField weaponNameField;
+    private TextField weaponTypeField;
+    private TextField weaponFireIntervalField;
+    private TextField weaponProjectileSpeedField;
+    private TextField weaponProjectileLifetimeField;
+    private TextField weaponProjectileRadiusField;
+    private TextField weaponTurretSpriteField;
+    private TextField weaponTurnRateField;
+    private CheckBox weaponHomingCheck;
+    private CheckBox weaponTurretCompatCheck;
+    private CheckBox weaponHardpointCompatCheck;
+    private TextField weaponHomingTurnField;
+
     public ModdingScreen(Stage stage, Skin skin, ScreenListener listener) {
         this.stage = stage;
         this.skin = skin;
@@ -50,13 +74,14 @@ public class ModdingScreen {
         this.listener = listener;
 
         buildListUI();
-        setupInput();
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
     }
 
     private void setupInput() {
         InputMultiplexer mux = new InputMultiplexer();
-        mux.addProcessor(shipEditor.getInputProcessor());
+        if (mode == Mode.EDIT_SHIP) {
+            mux.addProcessor(shipEditor.getInputProcessor());
+        }
         mux.addProcessor(stage);
         Gdx.input.setInputProcessor(mux);
     }
@@ -64,8 +89,16 @@ public class ModdingScreen {
     private void buildListUI() {
         stage.clear();
         mode = Mode.LIST;
+        if (editorWindow != null) {
+            editorWindow.remove();
+            editorWindow = null;
+        }
+        if (weaponEditorWindow != null) {
+            weaponEditorWindow.remove();
+            weaponEditorWindow = null;
+        }
 
-        listWindow = new Window("Modding - Spaceships", skin, "border");
+        listWindow = new Window("Modding", skin, "border");
         listWindow.defaults().pad(6f);
 
         TextButton backButton = new TextButton("Back", skin);
@@ -86,98 +119,206 @@ public class ModdingScreen {
             }
         });
 
+        TextButton shipsTab = new TextButton("Ships", skin);
+        shipsTab.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                listTab = ListTab.SHIPS;
+                buildListUI();
+            }
+        });
+
+        TextButton weaponsTab = new TextButton("Weapons", skin);
+        weaponsTab.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                listTab = ListTab.WEAPONS;
+                buildListUI();
+            }
+        });
+
+        TextButton createShipButton = new TextButton("Create ship…", skin);
+        createShipButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                openCreateShipDialog();
+            }
+        });
+
+        TextButton createWeaponButton = new TextButton("Create weapon…", skin);
+        createWeaponButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                openCreateWeaponDialog();
+            }
+        });
+
         listWindow.add(backButton).left();
         listWindow.add(refreshButton).right().row();
 
-        Table listTable = new Table(skin);
-        listTable.defaults().pad(4f).left();
-        populateShipList(listTable);
+        Table tabRow = new Table(skin);
+        tabRow.defaults().pad(4f);
+        tabRow.add(new Label("Category:", skin)).padRight(8f);
+        tabRow.add(shipsTab);
+        tabRow.add(weaponsTab).row();
+        tabRow.add(createShipButton).padTop(4f);
+        tabRow.add(createWeaponButton).padTop(4f);
+        listWindow.add(tabRow).left().row();
 
-        ScrollPane scrollPane = new ScrollPane(listTable, skin);
+        listInnerTable = new Table(skin);
+        listInnerTable.defaults().pad(4f).left();
+        if (listTab == ListTab.SHIPS) {
+            populateShipJsonList(listInnerTable);
+        } else {
+            populateWeaponJsonList(listInnerTable);
+        }
+
+        ScrollPane scrollPane = new ScrollPane(listInnerTable, skin);
         scrollPane.setFadeScrollBars(false);
         scrollPane.setScrollingDisabled(true, false);
 
-        listWindow.add(scrollPane).width(520f).height(360f).row();
+        listWindow.add(scrollPane).width(720f).height(380f).row();
 
         UiWindowUtils.createAndCenterWindow(listWindow, stage, 10f);
+        setupInput();
     }
 
-    private static class ShipEntry {
-        final FileHandle textureFile;
-        final FileHandle jsonFile;
-
-        ShipEntry(FileHandle textureFile) {
-            this.textureFile = textureFile;
-            this.jsonFile = ShipDataIO.toJsonFileForTexture(textureFile);
-        }
-
-        boolean hasData() { return jsonFile.exists(); }
-    }
-
-    private void populateShipList(Table table) {
+    private static ArrayList<FileHandle> collectShipJsonFiles() {
+        ArrayList<FileHandle> out = new ArrayList<>();
         FileHandle modsDir = Gdx.files.local("mods");
-        modsDir.mkdirs();
-
-        SimpleArray<ShipEntry> entries = new SimpleArray<>();
-
+        if (!modsDir.exists()) {
+            return out;
+        }
         for (FileHandle modFolder : modsDir.list()) {
             if (!modFolder.isDirectory()) continue;
-
-            addPngEntries(entries, modFolder);
-
+            for (FileHandle f : modFolder.list()) {
+                if (f.isDirectory()) continue;
+                if (!"json".equalsIgnoreCase(f.extension())) continue;
+                out.add(f);
+            }
             FileHandle spaceshipsDir = modFolder.child("spaceships");
             if (spaceshipsDir.exists() && spaceshipsDir.isDirectory()) {
-                addPngEntries(entries, spaceshipsDir);
+                for (FileHandle f : spaceshipsDir.list()) {
+                    if (f.isDirectory()) continue;
+                    if (!"json".equalsIgnoreCase(f.extension())) continue;
+                    out.add(f);
+                }
             }
         }
+        out.sort(Comparator.comparing(FileHandle::path));
+        return out;
+    }
 
-        if (entries.size() == 0) {
-            table.add(new Label("No ship PNGs found. Put files under mods/<mod>/spaceships/*.png", skin)).row();
+    private static ArrayList<FileHandle> collectWeaponJsonFiles() {
+        ArrayList<FileHandle> out = new ArrayList<>();
+        FileHandle modsDir = Gdx.files.local("mods");
+        if (!modsDir.exists()) {
+            return out;
+        }
+        for (FileHandle modFolder : modsDir.list()) {
+            if (!modFolder.isDirectory()) continue;
+            FileHandle weaponsDir = modFolder.child("weapons");
+            if (!weaponsDir.exists() || !weaponsDir.isDirectory()) continue;
+            for (FileHandle f : weaponsDir.list()) {
+                if (f.isDirectory()) continue;
+                if (!"json".equalsIgnoreCase(f.extension())) continue;
+                out.add(f);
+            }
+        }
+        out.sort(Comparator.comparing(FileHandle::path));
+        return out;
+    }
+
+    private void populateShipJsonList(Table table) {
+        ArrayList<FileHandle> files = collectShipJsonFiles();
+        if (files.isEmpty()) {
+            Label empty = new Label("No ship JSON found. Put ship definitions in mods/<mod>/*.json or mods/<mod>/spaceships/*.json (not in weapons/).", skin);
+            empty.setWrap(true);
+            table.add(empty).width(680f).row();
             return;
         }
 
-        table.add(new Label("Ship", skin)).width(240f);
-        table.add(new Label("Status", skin)).width(120f);
-        table.add(new Label("", skin)).width(120f).row();
+        table.add(new Label("Ship (id)", skin)).width(200f);
+        table.add(new Label("JSON path", skin)).width(280f);
+        table.add(new Label("Image", skin)).width(100f);
+        table.add(new Label("", skin)).width(100f).row();
 
-        for (int i = 0; i < entries.size(); i++) {
-            ShipEntry e = entries.get(i);
-            String shipId = e.textureFile.nameWithoutExtension();
-            String status = e.hasData() ? "Implemented" : "Missing data";
+        for (FileHandle jsonFile : files) {
+            ShipData peek = ShipDataIO.loadFromJson(jsonFile);
+            String id = peek != null && peek.id != null && !peek.id.isBlank() ? peek.id : jsonFile.nameWithoutExtension();
+            String texPath = peek != null ? peek.texturePath : "";
+            boolean imageOk = false;
+            if (texPath != null && !texPath.isBlank()) {
+                FileHandle t = Gdx.files.local(texPath);
+                imageOk = t.exists() || Gdx.files.internal(texPath).exists();
+            }
 
-            table.add(new Label(shipId, skin)).width(240f);
-            table.add(new Label(status, skin)).width(120f);
+            table.add(new Label(id, skin)).width(200f);
+            table.add(new Label(jsonFile.path(), skin)).width(280f);
+            table.add(new Label(imageOk ? "OK" : "Missing", skin)).width(100f);
 
             TextButton editButton = new TextButton("Edit", skin);
+            FileHandle jsonRef = jsonFile;
             editButton.addListener(new ChangeListener() {
                 @Override
                 public void changed(ChangeEvent event, Actor actor) {
-                    openEditor(e);
+                    openShipEditor(jsonRef);
                 }
             });
-            table.add(editButton).width(120f).row();
+            table.add(editButton).width(100f).row();
         }
     }
 
-    private void addPngEntries(SimpleArray<ShipEntry> entries, FileHandle dir) {
-        for (FileHandle f : dir.list()) {
-            if (f.isDirectory()) continue;
-            if (!"png".equalsIgnoreCase(f.extension())) continue;
-            entries.add(new ShipEntry(f));
+    private void populateWeaponJsonList(Table table) {
+        ArrayList<FileHandle> files = collectWeaponJsonFiles();
+        if (files.isEmpty()) {
+            Label empty = new Label("No weapon JSON found. Add mods/<mod>/weapons/*.json or use Create weapon.", skin);
+            empty.setWrap(true);
+            table.add(empty).width(680f).row();
+            return;
+        }
+
+        table.add(new Label("Weapon id", skin)).width(200f);
+        table.add(new Label("Path", skin)).width(380f);
+        table.add(new Label("", skin)).width(100f).row();
+
+        for (FileHandle jsonFile : files) {
+            WeaponData w = WeaponDataIO.loadFromJsonFile(jsonFile);
+            String id = w != null && w.id != null ? w.id : jsonFile.nameWithoutExtension();
+            table.add(new Label(id, skin)).width(200f);
+            table.add(new Label(jsonFile.path(), skin)).width(380f);
+
+            TextButton editButton = new TextButton("Edit", skin);
+            FileHandle jsonRef = jsonFile;
+            editButton.addListener(new ChangeListener() {
+                @Override
+                public void changed(ChangeEvent event, Actor actor) {
+                    openWeaponEditor(jsonRef);
+                }
+            });
+            table.add(editButton).width(100f).row();
         }
     }
 
-    private void openEditor(ShipEntry entry) {
-        mode = Mode.EDIT;
-        shipEditor.loadShip(entry.textureFile);
-        buildEditorUI(entry);
-    }
-
-    private void buildEditorUI(ShipEntry entry) {
+    private void openShipEditor(FileHandle jsonFile) {
+        mode = Mode.EDIT_SHIP;
+        editingShipJson = jsonFile;
         if (listWindow != null) listWindow.remove();
+        if (weaponEditorWindow != null) {
+            weaponEditorWindow.remove();
+            weaponEditorWindow = null;
+        }
+
+        shipEditor.loadShipFromDefinition(jsonFile);
+        buildShipEditorUI();
+        setupInput();
+    }
+
+    private void buildShipEditorUI() {
         if (editorWindow != null) editorWindow.remove();
 
-        editorWindow = new Window("Edit Ship - " + entry.textureFile.nameWithoutExtension(), skin, "border");
+        String titleId = shipEditor.getShipData() != null ? shipEditor.getShipData().id : editingShipJson.nameWithoutExtension();
+        editorWindow = new Window("Edit Ship — " + titleId, skin, "border");
         editorWindow.defaults().pad(6f);
 
         TextButton backButton = new TextButton("Back to list", skin);
@@ -185,6 +326,14 @@ public class ModdingScreen {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 buildListUI();
+            }
+        });
+
+        TextButton changeTextureButton = new TextButton("Change hull image…", skin);
+        changeTextureButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                openHullTexturePickerDialog();
             }
         });
 
@@ -248,12 +397,13 @@ public class ModdingScreen {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 applyEditorFieldsToData();
-                ShipDataIO.save(shipEditor.getShipData(), entry.jsonFile);
+                ShipDataIO.save(shipEditor.getShipData(), editingShipJson);
                 buildListUI();
             }
         });
 
         editorWindow.add(backButton).left();
+        editorWindow.add(changeTextureButton);
         editorWindow.add(addWeaponButton);
         editorWindow.add(slotTypeToggleButton);
         editorWindow.add(equipWeaponButton);
@@ -265,7 +415,6 @@ public class ModdingScreen {
         Table layerToggles = new Table(skin);
         layerToggles.defaults().pad(4f).left();
         layerToggles.add(new Label("Show:", skin)).padRight(10f);
-
         layerToggles.add(makeLayerCheckbox("Bounds", true, shipEditor::setLayerBoundsVisible)).padRight(12f);
         layerToggles.add(makeLayerCheckbox("Weapons", true, shipEditor::setLayerWeaponsVisible)).padRight(12f);
         layerToggles.add(makeLayerCheckbox("Engines", true, shipEditor::setLayerEnginesVisible)).padRight(12f);
@@ -280,6 +429,8 @@ public class ModdingScreen {
 
         Table fields = new Table(skin);
         fields.defaults().pad(4f).left();
+        fields.add(new Label("Texture path", skin)).width(120f);
+        fields.add(new Label(d.texturePath == null ? "(none)" : d.texturePath, skin)).width(520f).left().row();
         fields.add(new Label("Speed", skin)).width(120f);
         fields.add(speedField).width(120f).row();
         fields.add(new Label("Maneuver", skin)).width(120f);
@@ -302,6 +453,321 @@ public class ModdingScreen {
         stage.addActor(editorWindow);
     }
 
+    private void openHullTexturePickerDialog() {
+        ShipData d = shipEditor.getShipData();
+        if (d == null) return;
+
+        Dialog dialog = new Dialog("Pick hull PNG", skin, "dialog") {
+            @Override
+            protected void result(Object object) {
+            }
+        };
+        dialog.getContentTable().defaults().pad(4f).growX();
+
+        ArrayList<FileHandle> pngs = collectTexturePngFiles();
+        if (pngs.isEmpty()) {
+            dialog.getContentTable().add(new Label("No PNG files found under mods/.", skin)).row();
+        } else {
+            Table list = new Table(skin);
+            for (FileHandle fh : pngs) {
+                TextButton row = new TextButton(fh.path(), skin);
+                row.getLabel().setWrap(true);
+                row.addListener(new ChangeListener() {
+                    @Override
+                    public void changed(ChangeEvent event, Actor actor) {
+                        d.texturePath = fh.path();
+                        shipEditor.reloadHullTextureFromShipData();
+                        dialog.hide();
+                        buildShipEditorUI();
+                    }
+                });
+                list.add(row).growX().width(560f).row();
+            }
+            ScrollPane scroll = new ScrollPane(list, skin);
+            scroll.setFadeScrollBars(false);
+            scroll.setScrollingDisabled(true, false);
+            dialog.getContentTable().add(scroll).width(580f).height(320f).row();
+        }
+
+        dialog.button("Close", true);
+        dialog.show(stage);
+    }
+
+    private static ArrayList<FileHandle> collectTexturePngFiles() {
+        ArrayList<FileHandle> out = new ArrayList<>();
+        FileHandle modsDir = Gdx.files.local("mods");
+        if (!modsDir.exists()) {
+            return out;
+        }
+        for (FileHandle modFolder : modsDir.list()) {
+            if (!modFolder.isDirectory()) continue;
+            addPngFilesInDirectory(modFolder, out, false);
+            addPngFilesInDirectory(modFolder.child("spaceships"), out, true);
+            addPngFilesInDirectory(modFolder.child("weapons"), out, true);
+        }
+        out.sort(Comparator.comparing(FileHandle::path));
+        return out;
+    }
+
+    private static void addPngFilesInDirectory(FileHandle dir, ArrayList<FileHandle> out, boolean requireDir) {
+        if (requireDir && (!dir.exists() || !dir.isDirectory())) {
+            return;
+        }
+        if (!dir.exists() || !dir.isDirectory()) {
+            return;
+        }
+        for (FileHandle f : dir.list()) {
+            if (f.isDirectory()) continue;
+            if (!"png".equalsIgnoreCase(f.extension())) continue;
+            out.add(f);
+        }
+    }
+
+    private void openCreateShipDialog() {
+        FileHandle defaultMod = Gdx.files.local("mods/core");
+        defaultMod.mkdirs();
+
+        Dialog dialog = new Dialog("Create ship", skin, "dialog") {
+            @Override
+            protected void result(Object object) {
+            }
+        };
+        dialog.getContentTable().defaults().pad(6f).growX();
+
+        final Label err = new Label("", skin);
+        err.setWrap(true);
+        final TextField idField = new TextField("", skin);
+        idField.setMessageText("ship_id");
+
+        dialog.getContentTable().add(new Label("New ship id (creates mods/core/<id>.json):", skin)).left().row();
+        dialog.getContentTable().add(idField).width(420f).row();
+        dialog.getContentTable().add(err).width(420f).row();
+
+        TextButton create = new TextButton("Create", skin);
+        create.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                String raw = idField.getText();
+                String stem = sanitizeFileStem(raw);
+                if (stem.isBlank()) {
+                    err.setText("Enter a valid id.");
+                    return;
+                }
+                FileHandle jsonOut = defaultMod.child(stem + ".json");
+                if (jsonOut.exists()) {
+                    err.setText("File already exists: " + jsonOut.path());
+                    return;
+                }
+                ShipData data = newDefaultShipData(stem);
+                ShipDataIO.save(data, jsonOut);
+                dialog.hide();
+                listTab = ListTab.SHIPS;
+                buildListUI();
+                openShipEditor(jsonOut);
+            }
+        });
+        dialog.getContentTable().add(create).row();
+
+        dialog.button("Cancel", false);
+        dialog.show(stage);
+    }
+
+    private static ShipData newDefaultShipData(String id) {
+        ShipData d = new ShipData();
+        d.id = id;
+        d.name = id;
+        d.texturePath = "mods/core/" + id + ".png";
+        d.speed = 120f;
+        d.maneuverability = 2f;
+        d.cargoSpace = 2f;
+        d.weaponSlots = new ArrayList<>();
+        d.enginePositions = new ArrayList<>();
+        d.colliders = new ArrayList<>();
+        d.normalizeWeaponSlots();
+        d.normalizeCombatProfile();
+        d.normalizeColliders();
+        return d;
+    }
+
+    private void openCreateWeaponDialog() {
+        FileHandle weaponsDir = Gdx.files.local("mods/core/weapons");
+        weaponsDir.mkdirs();
+
+        Dialog dialog = new Dialog("Create weapon", skin, "dialog") {
+            @Override
+            protected void result(Object object) {
+            }
+        };
+        dialog.getContentTable().defaults().pad(6f).growX();
+
+        final Label err = new Label("", skin);
+        err.setWrap(true);
+        final TextField idField = new TextField("", skin);
+        idField.setMessageText("weapon_id");
+
+        dialog.getContentTable().add(new Label("New weapon id (creates mods/core/weapons/<id>.json):", skin)).left().row();
+        dialog.getContentTable().add(idField).width(420f).row();
+        dialog.getContentTable().add(err).width(420f).row();
+
+        TextButton create = new TextButton("Create", skin);
+        create.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                String stem = sanitizeFileStem(idField.getText());
+                if (stem.isBlank()) {
+                    err.setText("Enter a valid id.");
+                    return;
+                }
+                FileHandle jsonOut = weaponsDir.child(stem + ".json");
+                if (jsonOut.exists()) {
+                    err.setText("File already exists: " + jsonOut.path());
+                    return;
+                }
+                WeaponData w = new WeaponData();
+                w.id = stem;
+                w.name = stem;
+                WeaponDataIO.save(w, jsonOut);
+                dialog.hide();
+                listTab = ListTab.WEAPONS;
+                buildListUI();
+                openWeaponEditor(jsonOut);
+            }
+        });
+        dialog.getContentTable().add(create).row();
+
+        dialog.button("Cancel", false);
+        dialog.show(stage);
+    }
+
+    private static String sanitizeFileStem(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String s = raw.trim().replaceAll("[^a-zA-Z0-9_.\\-]", "_");
+        if (s.startsWith(".")) {
+            s = "ship_" + s;
+        }
+        return s;
+    }
+
+    private void openWeaponEditor(FileHandle jsonFile) {
+        mode = Mode.EDIT_WEAPON;
+        editingWeaponJson = jsonFile;
+        editingWeapon = WeaponDataIO.loadFromJsonFile(jsonFile);
+        if (editingWeapon == null) {
+            editingWeapon = new WeaponData();
+            editingWeapon.id = jsonFile.nameWithoutExtension();
+            editingWeapon.name = editingWeapon.id;
+        }
+
+        if (listWindow != null) listWindow.remove();
+        if (editorWindow != null) {
+            editorWindow.remove();
+            editorWindow = null;
+        }
+
+        buildWeaponEditorUI();
+        setupInput();
+    }
+
+    private void buildWeaponEditorUI() {
+        if (weaponEditorWindow != null) weaponEditorWindow.remove();
+
+        weaponEditorWindow = new Window("Edit Weapon — " + editingWeapon.id, skin, "border");
+        weaponEditorWindow.defaults().pad(6f);
+
+        TextButton backButton = new TextButton("Back to list", skin);
+        backButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                buildListUI();
+            }
+        });
+
+        TextButton saveButton = new TextButton("Save JSON", skin);
+        saveButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                applyWeaponFieldsToData();
+                WeaponDataIO.save(editingWeapon, editingWeaponJson);
+                buildListUI();
+            }
+        });
+
+        weaponEditorWindow.add(backButton).left();
+        weaponEditorWindow.add(saveButton).right().row();
+
+        weaponNameField = new TextField(editingWeapon.name, skin);
+        weaponTypeField = new TextField(editingWeapon.type, skin);
+        weaponFireIntervalField = new TextField(Float.toString(editingWeapon.fireInterval), skin);
+        weaponProjectileSpeedField = new TextField(Float.toString(editingWeapon.projectileSpeed), skin);
+        weaponProjectileLifetimeField = new TextField(Float.toString(editingWeapon.projectileLifetime), skin);
+        weaponProjectileRadiusField = new TextField(Float.toString(editingWeapon.projectileRadius), skin);
+        weaponTurretSpriteField = new TextField(editingWeapon.turretSprite == null ? "" : editingWeapon.turretSprite, skin);
+        weaponTurnRateField = new TextField(Float.toString(editingWeapon.turnRateDegPerSec), skin);
+        weaponHomingCheck = new CheckBox("Homing", skin);
+        weaponHomingCheck.setChecked(editingWeapon.homing);
+        weaponTurretCompatCheck = new CheckBox("Turret slot", skin);
+        weaponTurretCompatCheck.setChecked(editingWeapon.turretCompatible);
+        weaponHardpointCompatCheck = new CheckBox("Hardpoint slot", skin);
+        weaponHardpointCompatCheck.setChecked(editingWeapon.hardpointCompatible);
+        weaponHomingTurnField = new TextField(Float.toString(editingWeapon.homingTurnRateDegPerSec), skin);
+
+        Table t = new Table(skin);
+        t.defaults().pad(4f).left();
+        t.add(new Label("Id (from file)", skin)).width(160f);
+        t.add(new Label(editingWeapon.id, skin)).width(400f).left().row();
+        t.add(new Label("Name", skin)).width(160f);
+        t.add(weaponNameField).width(400f).row();
+        t.add(new Label("Category type", skin)).width(160f);
+        t.add(weaponTypeField).width(400f).row();
+        t.add(new Label("Fire interval (s)", skin)).width(160f);
+        t.add(weaponFireIntervalField).width(160f).row();
+        t.add(new Label("Projectile speed", skin)).width(160f);
+        t.add(weaponProjectileSpeedField).width(160f).row();
+        t.add(new Label("Projectile lifetime", skin)).width(160f);
+        t.add(weaponProjectileLifetimeField).width(160f).row();
+        t.add(new Label("Projectile radius", skin)).width(160f);
+        t.add(weaponProjectileRadiusField).width(160f).row();
+        t.add(new Label("Turret sprite path", skin)).width(160f);
+        t.add(weaponTurretSpriteField).width(400f).row();
+        t.add(new Label("Turn rate °/s", skin)).width(160f);
+        t.add(weaponTurnRateField).width(160f).row();
+        t.add(weaponHomingCheck).colspan(2).left().row();
+        t.add(new Label("Homing turn °/s", skin)).width(160f);
+        t.add(weaponHomingTurnField).width(160f).row();
+        t.add(weaponTurretCompatCheck).colspan(2).left().row();
+        t.add(weaponHardpointCompatCheck).colspan(2).left().row();
+
+        weaponEditorWindow.add(t).left().row();
+        weaponEditorWindow.pack();
+        weaponEditorWindow.setPosition(10f, Math.max(10f, stage.getHeight() - weaponEditorWindow.getHeight() - 10f));
+        stage.addActor(weaponEditorWindow);
+    }
+
+    private void applyWeaponFieldsToData() {
+        if (editingWeapon == null) return;
+        editingWeapon.name = weaponNameField.getText().trim();
+        if (editingWeapon.name.isBlank()) {
+            editingWeapon.name = editingWeapon.id;
+        }
+        editingWeapon.type = weaponTypeField.getText().trim();
+        if (editingWeapon.type.isBlank()) {
+            editingWeapon.type = "GENERIC";
+        }
+        editingWeapon.fireInterval = parseFloatSafe(weaponFireIntervalField, editingWeapon.fireInterval);
+        editingWeapon.projectileSpeed = parseFloatSafe(weaponProjectileSpeedField, editingWeapon.projectileSpeed);
+        editingWeapon.projectileLifetime = parseFloatSafe(weaponProjectileLifetimeField, editingWeapon.projectileLifetime);
+        editingWeapon.projectileRadius = parseFloatSafe(weaponProjectileRadiusField, editingWeapon.projectileRadius);
+        String ts = weaponTurretSpriteField.getText().trim();
+        editingWeapon.turretSprite = ts.isBlank() ? null : ts;
+        editingWeapon.turnRateDegPerSec = parseFloatSafe(weaponTurnRateField, editingWeapon.turnRateDegPerSec);
+        editingWeapon.homing = weaponHomingCheck.isChecked();
+        editingWeapon.turretCompatible = weaponTurretCompatCheck.isChecked();
+        editingWeapon.hardpointCompatible = weaponHardpointCompatCheck.isChecked();
+        editingWeapon.homingTurnRateDegPerSec = parseFloatSafe(weaponHomingTurnField, editingWeapon.homingTurnRateDegPerSec);
+    }
+
     private void applyEditorFieldsToData() {
         ShipData d = shipEditor.getShipData();
         if (d == null) return;
@@ -314,7 +780,7 @@ public class ModdingScreen {
     private float parseFloatSafe(TextField field, float fallback) {
         if (field == null) return fallback;
         try {
-            return Float.parseFloat(field.getText());
+            return Float.parseFloat(field.getText().trim());
         } catch (Exception ignored) {
             return fallback;
         }
@@ -356,7 +822,6 @@ public class ModdingScreen {
         Dialog dialog = new Dialog("Equip weapon", skin, "dialog") {
             @Override
             protected void result(Object object) {
-                // dismiss
             }
         };
         dialog.getContentTable().defaults().pad(4f).growX();
@@ -365,10 +830,8 @@ public class ModdingScreen {
             dialog.getContentTable().add(new Label("No weapons found. Add JSON under mods/<mod>/weapons/", skin)).row();
         } else {
             Table list = new Table(skin);
-            int compatible = 0;
             for (WeaponData wd : weapons) {
                 if (!wd.canEquipOn(slot.type)) continue;
-                compatible++;
                 TextButton pick = new TextButton(wd.id + " — " + wd.name, skin);
                 pick.addListener(new ChangeListener() {
                     @Override
@@ -379,9 +842,6 @@ public class ModdingScreen {
                     }
                 });
                 list.add(pick).growX().row();
-            }
-            if (compatible == 0) {
-                list.add(new Label("No weapons compatible with " + slot.type + ".", skin)).row();
             }
             ScrollPane scroll = new ScrollPane(list, skin);
             scroll.setFadeScrollBars(false);
@@ -404,35 +864,17 @@ public class ModdingScreen {
         dialog.show(stage);
     }
 
-    /** Tiny dynamic array helper to keep this file dependency-light. */
-    private static class SimpleArray<T> {
-        private Object[] data = new Object[16];
-        private int size = 0;
-
-        int size() { return size; }
-
-        void add(T v) {
-            if (size >= data.length) {
-                Object[] n = new Object[data.length * 2];
-                System.arraycopy(data, 0, n, 0, data.length);
-                data = n;
-            }
-            data[size++] = v;
-        }
-
-        @SuppressWarnings("unchecked")
-        T get(int idx) { return (T) data[idx]; }
-    }
-
     public void update(float deltaTime) {
-        if (mode == Mode.EDIT) {
+        if (mode == Mode.EDIT_SHIP) {
             shipEditor.update(deltaTime);
             refreshMountEditorLabels();
         }
     }
 
     public void render() {
-        if (mode == Mode.EDIT) shipEditor.render();
+        if (mode == Mode.EDIT_SHIP) {
+            shipEditor.render();
+        }
     }
 
     public void resize(int width, int height) {

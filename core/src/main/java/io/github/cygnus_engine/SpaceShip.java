@@ -104,7 +104,6 @@ public class SpaceShip extends GameObject {
     private final Array<ShipColliderCircle> collisionCircles = new Array<>();
     private final Affine2 worldTransform = new Affine2();
     private final Vector2 collisionScratch = new Vector2();
-    private float legacyFireCooldown = 0f;
     private Sprite hullSprite;
 
     public enum Behavior {
@@ -252,7 +251,6 @@ public class SpaceShip extends GameObject {
     }
 
     public void update(float deltaTime, ProjectileManager projectileManager) {
-        legacyFireCooldown = Math.max(0f, legacyFireCooldown - deltaTime);
         refreshWorldTransformAndMountCaches();
 
         switch (currentBehavior) {
@@ -323,11 +321,6 @@ public class SpaceShip extends GameObject {
         }
 
         if (weaponInstances.size == 0) {
-            if (!linedUpForShot || legacyFireCooldown > 0f) {
-                return;
-            }
-            tryFireLegacyForward(projectileManager);
-            legacyFireCooldown = 0.35f;
             return;
         }
 
@@ -370,26 +363,6 @@ public class SpaceShip extends GameObject {
             }
             w.fireCooldown = w.data.fireInterval;
         }
-    }
-
-    /** Fallback when a ship has no configured mounts (e.g. legacy data). */
-    private void tryFireLegacyForward(ProjectileManager projectileManager) {
-        float bulletSpeed = 280f;
-        float projectileLifetime = 2f;
-        float projectileRadius = 2.5f;
-        float rad = (float) Math.toRadians(getRotation());
-        float muzzleOffset = getSize() + projectileRadius + 2f;
-        float spawnX = getX() + (float) Math.cos(rad) * muzzleOffset;
-        float spawnY = getY() + (float) Math.sin(rad) * muzzleOffset;
-        projectileManager.spawn(
-            this,
-            spawnX,
-            spawnY,
-            getRotation(),
-            bulletSpeed,
-            projectileLifetime,
-            projectileRadius
-        );
     }
 
     private float aimAngleForIntercept(ShipWeaponInstance w) {

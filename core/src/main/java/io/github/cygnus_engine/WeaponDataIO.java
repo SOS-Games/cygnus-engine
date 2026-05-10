@@ -19,6 +19,21 @@ public final class WeaponDataIO {
         return json;
     }
 
+    /** Load a weapon from an explicit JSON file path. */
+    public static WeaponData loadFromJsonFile(FileHandle jsonFile) {
+        if (jsonFile == null || !jsonFile.exists()) {
+            return null;
+        }
+        WeaponData data = newJson().fromJson(WeaponData.class, jsonFile);
+        if (data.id == null || data.id.isBlank()) {
+            data.id = jsonFile.nameWithoutExtension();
+        }
+        if (data.name == null || data.name.isBlank()) {
+            data.name = data.id;
+        }
+        return data;
+    }
+
     public static WeaponData loadById(String weaponId) {
         if (weaponId == null || weaponId.isBlank()) return null;
 
@@ -93,6 +108,15 @@ public final class WeaponDataIO {
             }
         }
         return null;
+    }
+
+    public static void save(WeaponData data, FileHandle targetJsonFile) {
+        if (data == null) throw new IllegalArgumentException("WeaponData must not be null");
+        if (targetJsonFile == null) throw new IllegalArgumentException("targetJsonFile must not be null");
+        targetJsonFile.parent().mkdirs();
+        String text = newJson().prettyPrint(data);
+        targetJsonFile.writeString(text, false, "UTF-8");
+        Gdx.app.log("WeaponDataIO", "Saved weapon data to " + targetJsonFile.path());
     }
 
     public static FileHandle resolveTextureFile(String texturePath) {

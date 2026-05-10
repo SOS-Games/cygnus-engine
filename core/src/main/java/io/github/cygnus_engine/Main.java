@@ -69,10 +69,16 @@ public class Main extends ApplicationAdapter {
 
         UiWindowUtils.createAndCenterWindow(mainMenuScreen, stage);
 
-        // Set up input for menu navigation
-        InputMultiplexer inputMultiplexer = new InputMultiplexer();
-        inputMultiplexer.addProcessor(stage);
-        Gdx.input.setInputProcessor(inputMultiplexer);
+        bindMainMenuInput();
+    }
+
+    /** Restores input after modding or gameplay screens replace {@link Gdx#input}. */
+    private void bindMainMenuInput() {
+        InputMultiplexer mux = new InputMultiplexer();
+        mux.addProcessor(stage);
+        Gdx.input.setInputProcessor(mux);
+        stage.setKeyboardFocus(null);
+        stage.setScrollFocus(null);
     }
     
     private void switchToPlayScreen() {
@@ -100,6 +106,15 @@ public class Main extends ApplicationAdapter {
     }
     
     private void switchToMainMenu() {
+        if (moddingScreen != null) {
+            moddingScreen.dispose();
+            moddingScreen = null;
+        }
+        if (gameScreen != null) {
+            gameScreen.dispose();
+            gameScreen = null;
+        }
+
         stage.clear();
         currentScreen = ScreenState.MAIN_MENU;
         
@@ -120,6 +135,7 @@ public class Main extends ApplicationAdapter {
             }
         });
         UiWindowUtils.createAndCenterWindow(mainMenuScreen, stage);
+        bindMainMenuInput();
     }
     
     @Override
@@ -159,6 +175,14 @@ public class Main extends ApplicationAdapter {
 
     @Override
     public void dispose() {
+        if (gameScreen != null) {
+            gameScreen.dispose();
+            gameScreen = null;
+        }
+        if (moddingScreen != null) {
+            moddingScreen.dispose();
+            moddingScreen = null;
+        }
         stage.dispose();
-    };
+    }
 }
