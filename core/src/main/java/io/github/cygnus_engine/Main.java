@@ -12,9 +12,8 @@ import com.badlogic.gdx.utils.viewport.ScreenViewport;
 // add a UI to show current ship info (hp) or cargo or hail the closest ship/planet/station
 // keybinds to open inventory screen.
 
-// a lite ship modding system that allows defining the extents of a ship
-// add a ship modding system, which allows importing a texture and/or existing JSON
-// defining the bounds of the ship, and drawing weapon/engine points and center-of-mass
+// a lite ship modding system that allows importing a texture and/or existing JSON
+// defining weapon/engine points, colliders, and center-of-mass
 
 // long-term:
 

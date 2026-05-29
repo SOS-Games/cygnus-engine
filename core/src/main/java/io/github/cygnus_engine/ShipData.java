@@ -3,7 +3,6 @@ package io.github.cygnus_engine;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 
 
@@ -38,12 +37,6 @@ public class ShipData {
      * Use {@code 0} to keep engine default.
      */
     public float hullTurnDegPerSec = 0f;
-
-    /**
-     * Ship bounds in world units, relative to the ship's center (0,0).
-     * Example: x=-16,y=-16,width=32,height=32
-     */
-    public Rectangle bounds = new Rectangle(-16, -16, 32, 32);
 
     public Vector2 centerOfMass = new Vector2();
     

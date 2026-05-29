@@ -1,9 +1,12 @@
 {
 "id": "light frigate 1",
 "name": "light frigate 1",
-"texturePath": "mods/core/light frigate 1.png",
+"texturePath": "mods/core/medium fighter 4.png",
+"combatProfile": "FRIGATE",
 "colliders": [
 	{
+		"x": -4,
+		"y": -5,
 		"radius": 16
 	}
 ]

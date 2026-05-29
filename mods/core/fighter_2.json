@@ -1,0 +1,45 @@
+{
+"id": "fighter_2",
+"name": "fighter_2",
+"texturePath": "mods/core/heavy fighter 3.png",
+"speed": 120,
+"maneuverability": 2,
+"cargoSpace": 2,
+"centerOfMass": {
+	"x": 1,
+	"y": -1
+},
+"weaponSlots": [
+	{
+		"id": "slot_0",
+		"x": -10,
+		"y": 2,
+		"equippedWeaponId": "burst_laser"
+	},
+	{
+		"id": "slot_1",
+		"x": 10,
+		"y": 2,
+		"equippedWeaponId": "burst_laser"
+	},
+	{
+		"id": "slot_2",
+		"x": -5,
+		"y": 10,
+		"type": "HARDPOINT",
+		"equippedWeaponId": "homing_needle"
+	},
+	{
+		"id": "slot_3",
+		"x": 5,
+		"y": 10,
+		"equippedWeaponId": "burst_laser"
+	}
+],
+"colliders": [
+	{
+		"x": 1,
+		"radius": 14.4
+	}
+]
+}

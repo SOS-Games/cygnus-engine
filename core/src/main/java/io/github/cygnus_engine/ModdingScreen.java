@@ -18,11 +18,14 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.ui.Window;
+import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
+import com.badlogic.gdx.utils.Array;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.Consumer;
 
 public class ModdingScreen {
     public interface ScreenListener {
@@ -41,7 +44,8 @@ public class ModdingScreen {
     private ListTab listTab = ListTab.SHIPS;
 
     private Window listWindow;
-    private Window editorWindow;
+    private Window editorTopBar;
+    private Window editorLeftPanel;
     private Window weaponEditorWindow;
 
     private Table listInnerTable;
@@ -53,6 +57,11 @@ public class ModdingScreen {
     private TextField speedField;
     private TextField maneuverField;
     private TextField cargoField;
+    private SelectBox<String> combatProfileSelect;
+    private Table frigateOrbitFields;
+    private TextField orbitRadiusField;
+    private TextField orbitBandField;
+    private TextField hullTurnField;
     private TextButton symmetryButton;
     private Label mountEditorInfoLabel;
     private TextButton slotTypeToggleButton;
@@ -88,20 +97,17 @@ public class ModdingScreen {
 
     private void setupInput() {
         InputMultiplexer mux = new InputMultiplexer();
+        mux.addProcessor(stage);
         if (mode == Mode.EDIT_SHIP) {
             mux.addProcessor(shipEditor.getInputProcessor());
         }
-        mux.addProcessor(stage);
         Gdx.input.setInputProcessor(mux);
     }
 
     private void buildListUI() {
         stage.clear();
         mode = Mode.LIST;
-        if (editorWindow != null) {
-            editorWindow.remove();
-            editorWindow = null;
-        }
+        removeShipEditorPanels();
         if (weaponEditorWindow != null) {
             weaponEditorWindow.remove();
             weaponEditorWindow = null;
@@ -170,8 +176,11 @@ public class ModdingScreen {
         tabRow.add(new Label("Category:", skin)).padRight(8f);
         tabRow.add(shipsTab);
         tabRow.add(weaponsTab).row();
-        tabRow.add(createShipButton).padTop(4f);
-        tabRow.add(createWeaponButton).padTop(4f);
+        if (listTab == ListTab.SHIPS) {
+            tabRow.add(createShipButton).padTop(4f);
+        } else {
+            tabRow.add(createWeaponButton).padTop(4f);
+        }
         listWindow.add(tabRow).left().row();
 
         listInnerTable = new Table(skin);
@@ -323,12 +332,44 @@ public class ModdingScreen {
         setupInput();
     }
 
+    private void removeShipEditorPanels() {
+        if (editorTopBar != null) {
+            editorTopBar.remove();
+            editorTopBar = null;
+        }
+        if (editorLeftPanel != null) {
+            editorLeftPanel.remove();
+            editorLeftPanel = null;
+        }
+    }
+
+    private void layoutShipEditorPanels() {
+        if (editorTopBar == null) {
+            return;
+        }
+
+        float stageW = stage.getWidth();
+        float stageH = stage.getHeight();
+        float topH = editorTopBar.getHeight();
+        editorTopBar.setSize(stageW, topH);
+        editorTopBar.setPosition(0f, stageH - topH);
+
+        float leftW = editorLeftPanel != null ? editorLeftPanel.getWidth() : 0f;
+        if (editorLeftPanel != null) {
+            editorLeftPanel.setPosition(0f, 0f);
+            editorLeftPanel.setHeight(Math.max(0f, stageH - topH));
+        }
+
+        shipEditor.setViewportInsets(leftW, topH, 0f, 0f);
+        shipEditor.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+    }
+
     private void buildShipEditorUI() {
-        if (editorWindow != null) editorWindow.remove();
+        removeShipEditorPanels();
 
         String titleId = shipEditor.getShipData() != null ? shipEditor.getShipData().id : editingShipJson.nameWithoutExtension();
-        editorWindow = new Window("Edit Ship — " + titleId, skin, "border");
-        editorWindow.defaults().pad(6f);
+        editorTopBar = new Window("Edit Ship — " + titleId, skin, "border");
+        editorTopBar.defaults().pad(4f);
 
         TextButton backButton = new TextButton("Back to list", skin);
         backButton.addListener(new ChangeListener() {
@@ -421,30 +462,40 @@ public class ModdingScreen {
             }
         });
 
-        editorWindow.add(backButton).left();
-        editorWindow.add(changeTextureButton);
-        editorWindow.add(addWeaponButton);
-        editorWindow.add(addEngineButton);
-        editorWindow.add(addColliderButton);
-        editorWindow.add(symmetryButton);
-        editorWindow.add(saveButton).right().row();
+        editorTopBar.add(backButton).padRight(6f);
+        editorTopBar.add(changeTextureButton).padRight(6f);
+        editorTopBar.add(addWeaponButton).padRight(6f);
+        editorTopBar.add(addEngineButton).padRight(6f);
+        editorTopBar.add(addColliderButton).padRight(6f);
+        editorTopBar.add(symmetryButton).padRight(6f);
+        editorTopBar.add(saveButton).padRight(6f).row();
+
+        mountEditorInfoLabel = new Label("", skin);
+        mountEditorInfoLabel.setWrap(true);
+
+        Table deleteColumn = new Table(skin);
+        deleteColumn.defaults().pad(2f);
+        deleteColumn.add(deleteSelectionButton).left().row();
+        deleteColumn.add(mountEditorInfoLabel).width(220f).left().padTop(2f).row();
 
         mountActionsRow = new Table(skin);
         mountActionsRow.defaults().pad(4f);
         mountActionsRow.add(equipWeaponButton).padRight(8f);
         mountActionsRow.add(slotTypeToggleButton).padRight(8f);
-        mountActionsRow.add(deleteSelectionButton);
-        editorWindow.add(mountActionsRow).left().padTop(4f).row();
+        mountActionsRow.add(deleteColumn).left();
+        editorTopBar.add(mountActionsRow).left().colspan(7).padTop(2f).row();
+
+        editorLeftPanel = new Window("Stats & layers", skin, "border");
+        editorLeftPanel.defaults().pad(4f).left();
 
         Table layerToggles = new Table(skin);
-        layerToggles.defaults().pad(4f).left();
-        layerToggles.add(new Label("Show:", skin)).padRight(10f);
-        layerToggles.add(makeLayerCheckbox("Bounds", true, shipEditor::setLayerBoundsVisible)).padRight(12f);
-        layerToggles.add(makeLayerCheckbox("Weapons", true, shipEditor::setLayerWeaponsVisible)).padRight(12f);
-        layerToggles.add(makeLayerCheckbox("Engines", true, shipEditor::setLayerEnginesVisible)).padRight(12f);
-        layerToggles.add(makeLayerCheckbox("COM", true, shipEditor::setLayerCenterOfMassVisible)).padRight(12f);
-        layerToggles.add(makeLayerCheckbox("Colliders", true, shipEditor::setLayerCollidersVisible));
-        editorWindow.add(layerToggles).left().colspan(8).padTop(6f).row();
+        layerToggles.defaults().pad(2f).left();
+        layerToggles.add(new Label("Show:", skin)).left().row();
+        layerToggles.add(makeLayerCheckbox("Weapons", true, shipEditor::setLayerWeaponsVisible)).left().row();
+        layerToggles.add(makeLayerCheckbox("Engines", true, shipEditor::setLayerEnginesVisible)).left().row();
+        layerToggles.add(makeLayerCheckbox("COM", true, shipEditor::setLayerCenterOfMassVisible)).left().row();
+        layerToggles.add(makeLayerCheckbox("Colliders", true, shipEditor::setLayerCollidersVisible)).left().row();
+        editorLeftPanel.add(layerToggles).left().padBottom(8f).row();
 
         ShipData d = shipEditor.getShipData();
         speedField = new TextField(Float.toString(d.speed), skin);
@@ -452,29 +503,63 @@ public class ModdingScreen {
         cargoField = new TextField(Float.toString(d.cargoSpace), skin);
 
         Table fields = new Table(skin);
-        fields.defaults().pad(4f).left();
-        fields.add(new Label("Texture path", skin)).width(120f);
-        fields.add(new Label(d.texturePath == null ? "(none)" : d.texturePath, skin)).width(520f).left().row();
-        fields.add(new Label("Speed", skin)).width(120f);
+        fields.defaults().pad(2f).left();
+        fields.add(new Label("Texture", skin)).width(90f).row();
+        Label texturePathLabel = new Label(d.texturePath == null ? "(none)" : d.texturePath, skin);
+        texturePathLabel.setWrap(true);
+        fields.add(texturePathLabel).width(210f).left().row();
+        fields.add(new Label("Speed", skin)).width(90f).row();
         fields.add(speedField).width(120f).row();
-        fields.add(new Label("Maneuver", skin)).width(120f);
+        fields.add(new Label("Maneuver", skin)).width(90f).row();
         fields.add(maneuverField).width(120f).row();
-        fields.add(new Label("Cargo", skin)).width(120f);
+        fields.add(new Label("Cargo", skin)).width(90f).row();
         fields.add(cargoField).width(120f).row();
 
-        editorWindow.add(fields).left().row();
+        d.normalizeCombatProfile();
+        combatProfileSelect = new SelectBox<>(skin);
+        Array<String> profiles = new Array<>();
+        profiles.add("FIGHTER");
+        profiles.add("FRIGATE");
+        combatProfileSelect.setItems(profiles);
+        combatProfileSelect.setSelected(d.combatProfile);
+        combatProfileSelect.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                refreshFrigateOrbitFieldsVisibility();
+            }
+        });
+        fields.add(new Label("Profile", skin)).width(90f).row();
+        fields.add(combatProfileSelect).width(140f).row();
 
-        mountEditorInfoLabel = new Label("", skin);
-        mountEditorInfoLabel.setWrap(true);
-        refreshSelectionUI();
-        editorWindow.add(mountEditorInfoLabel).left().width(720f).row();
+        orbitRadiusField = new TextField(Float.toString(d.orbitCombatRadius), skin);
+        orbitBandField = new TextField(Float.toString(d.orbitCombatBand), skin);
+        hullTurnField = new TextField(Float.toString(d.hullTurnDegPerSec), skin);
 
-        editorWindow.add(new Label("Selected handles show a white ring. Delete removes weapon slots, engines, or colliders (not COM).", skin)).left().width(720f).row();
-        editorWindow.add(new Label("Colliders: cyan circles — drag centers to move, drag circumference to resize. Symmetry duplicates paired circles.", skin)).left().width(720f).row();
+        frigateOrbitFields = new Table(skin);
+        frigateOrbitFields.defaults().pad(2f).left();
+        frigateOrbitFields.add(new Label("Orbit radius", skin)).width(90f).row();
+        frigateOrbitFields.add(orbitRadiusField).width(120f).row();
+        frigateOrbitFields.add(new Label("Orbit band", skin)).width(90f).row();
+        frigateOrbitFields.add(orbitBandField).width(120f).row();
+        fields.add(frigateOrbitFields).left().row();
 
-        editorWindow.pack();
-        editorWindow.setPosition(10f, Math.max(10f, stage.getHeight() - editorWindow.getHeight() - 10f));
-        stage.addActor(editorWindow);
+        fields.add(new Label("Hull turn °/s", skin)).width(90f).row();
+        fields.add(hullTurnField).width(120f).row();
+
+        refreshFrigateOrbitFieldsVisibility();
+
+        ScrollPane fieldsScroll = new ScrollPane(fields, skin);
+        fieldsScroll.setFadeScrollBars(false);
+        fieldsScroll.setScrollingDisabled(true, false);
+        editorLeftPanel.add(fieldsScroll).width(230f).growY().row();
+
+        editorTopBar.pack();
+        editorLeftPanel.pack();
+
+        stage.addActor(editorLeftPanel);
+        stage.addActor(editorTopBar);
+
+        layoutShipEditorPanels();
         refreshSelectionUI();
     }
 
@@ -482,30 +567,42 @@ public class ModdingScreen {
         ShipData d = shipEditor.getShipData();
         if (d == null) return;
 
-        Dialog dialog = new Dialog("Pick hull PNG", skin, "dialog") {
+        openTexturePickerDialog("Pick hull PNG", collectTexturePngFiles(), fh -> {
+            d.texturePath = fh.path();
+            shipEditor.reloadHullTextureFromShipData();
+            buildShipEditorUI();
+        });
+    }
+
+    private void openTexturePickerDialog(String title, ArrayList<FileHandle> pngs, Consumer<FileHandle> onPick) {
+        final ArrayList<Texture> previewTextures = new ArrayList<>();
+        Dialog dialog = new Dialog(title, skin, "dialog") {
             @Override
             protected void result(Object object) {
+                disposePickerTextures(previewTextures);
             }
         };
         dialog.getContentTable().defaults().pad(4f).growX();
 
-        ArrayList<FileHandle> pngs = collectTexturePngFiles();
         if (pngs.isEmpty()) {
             dialog.getContentTable().add(new Label("No PNG files found under mods/.", skin)).row();
         } else {
             Table list = new Table(skin);
             for (FileHandle fh : pngs) {
-                TextButton row = new TextButton(fh.path(), skin);
-                row.getLabel().setWrap(true);
-                row.addListener(new ChangeListener() {
+                Table row = new Table(skin);
+                row.defaults().pad(4f);
+                addTexturePreviewCell(row, fh, previewTextures, skin);
+                TextButton pick = new TextButton(fh.path(), skin);
+                pick.getLabel().setWrap(true);
+                pick.addListener(new ChangeListener() {
                     @Override
                     public void changed(ChangeEvent event, Actor actor) {
-                        d.texturePath = fh.path();
-                        shipEditor.reloadHullTextureFromShipData();
+                        onPick.accept(fh);
+                        disposePickerTextures(previewTextures);
                         dialog.hide();
-                        buildShipEditorUI();
                     }
                 });
+                row.add(pick).growX();
                 list.add(row).growX().width(560f).row();
             }
             ScrollPane scroll = new ScrollPane(list, skin);
@@ -516,6 +613,33 @@ public class ModdingScreen {
 
         dialog.button("Close", true);
         dialog.show(stage);
+    }
+
+    private void addTexturePreviewCell(Table row, FileHandle fh, ArrayList<Texture> previewTextures, Skin skin) {
+        if (fh != null && fh.exists()) {
+            Texture tex = new Texture(fh);
+            tex.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+            previewTextures.add(tex);
+            Image thumb = new Image(new TextureRegionDrawable(new TextureRegion(tex)));
+            row.add(thumb).size(64f, 64f).padRight(8f);
+        } else {
+            row.add(new Label("(missing)", skin)).size(64f, 64f).padRight(8f);
+        }
+    }
+
+    private static void disposePickerTextures(ArrayList<Texture> textures) {
+        for (Texture tex : textures) {
+            tex.dispose();
+        }
+        textures.clear();
+    }
+
+    private void refreshFrigateOrbitFieldsVisibility() {
+        if (frigateOrbitFields == null || combatProfileSelect == null) {
+            return;
+        }
+        boolean frigate = "FRIGATE".equals(combatProfileSelect.getSelected());
+        frigateOrbitFields.setVisible(frigate);
     }
 
     private static ArrayList<FileHandle> collectTexturePngFiles() {
@@ -686,10 +810,7 @@ public class ModdingScreen {
         }
 
         if (listWindow != null) listWindow.remove();
-        if (editorWindow != null) {
-            editorWindow.remove();
-            editorWindow = null;
-        }
+        removeShipEditorPanels();
 
         buildWeaponEditorUI();
         setupInput();
@@ -789,37 +910,10 @@ public class ModdingScreen {
     }
 
     private void openWeaponSpritePickerDialog() {
-        Dialog dialog = new Dialog("Pick weapon sprite PNG", skin, "dialog") {
-            @Override
-            protected void result(Object object) {
-            }
-        };
-        dialog.getContentTable().defaults().pad(4f).growX();
-        ArrayList<FileHandle> pngs = collectTexturePngFiles();
-        if (pngs.isEmpty()) {
-            dialog.getContentTable().add(new Label("No PNG files found under mods/.", skin)).row();
-        } else {
-            Table list = new Table(skin);
-            for (FileHandle fh : pngs) {
-                TextButton row = new TextButton(fh.path(), skin);
-                row.getLabel().setWrap(true);
-                row.addListener(new ChangeListener() {
-                    @Override
-                    public void changed(ChangeEvent event, Actor actor) {
-                        weaponTurretSpriteField.setText(fh.path());
-                        refreshWeaponPreviewImage();
-                        dialog.hide();
-                    }
-                });
-                list.add(row).growX().width(560f).row();
-            }
-            ScrollPane scroll = new ScrollPane(list, skin);
-            scroll.setFadeScrollBars(false);
-            scroll.setScrollingDisabled(true, false);
-            dialog.getContentTable().add(scroll).width(580f).height(320f).row();
-        }
-        dialog.button("Close", true);
-        dialog.show(stage);
+        openTexturePickerDialog("Pick weapon sprite PNG", collectTexturePngFiles(), fh -> {
+            weaponTurretSpriteField.setText(fh.path());
+            refreshWeaponPreviewImage();
+        });
     }
 
     private void refreshWeaponPreviewImage() {
@@ -877,6 +971,13 @@ public class ModdingScreen {
         d.speed = parseFloatSafe(speedField, d.speed);
         d.maneuverability = parseFloatSafe(maneuverField, d.maneuverability);
         d.cargoSpace = parseFloatSafe(cargoField, d.cargoSpace);
+        if (combatProfileSelect != null) {
+            d.combatProfile = combatProfileSelect.getSelected();
+        }
+        d.orbitCombatRadius = parseFloatSafe(orbitRadiusField, d.orbitCombatRadius);
+        d.orbitCombatBand = parseFloatSafe(orbitBandField, d.orbitCombatBand);
+        d.hullTurnDegPerSec = parseFloatSafe(hullTurnField, d.hullTurnDegPerSec);
+        d.normalizeCombatProfile();
     }
 
     private float parseFloatSafe(TextField field, float fallback) {
@@ -934,9 +1035,11 @@ public class ModdingScreen {
         WeaponSlot slot = shipEditor.getSelectedWeaponSlot();
         if (slot == null) return;
 
+        final ArrayList<Texture> previewTextures = new ArrayList<>();
         Dialog dialog = new Dialog("Equip weapon", skin, "dialog") {
             @Override
             protected void result(Object object) {
+                disposePickerTextures(previewTextures);
             }
         };
         dialog.getContentTable().defaults().pad(4f).growX();
@@ -947,21 +1050,31 @@ public class ModdingScreen {
             Table list = new Table(skin);
             for (WeaponData wd : weapons) {
                 if (!wd.canEquipOn(slot.type)) continue;
+                Table row = new Table(skin);
+                row.defaults().pad(4f);
+                if (wd.turretSprite != null && !wd.turretSprite.isBlank()) {
+                    FileHandle spriteFile = WeaponDataIO.resolveTextureFile(wd.turretSprite);
+                    addTexturePreviewCell(row, spriteFile, previewTextures, skin);
+                } else {
+                    row.add(new Label("(no sprite)", skin)).size(64f, 64f).padRight(8f);
+                }
                 TextButton pick = new TextButton(wd.id + " — " + wd.name, skin);
                 pick.addListener(new ChangeListener() {
                     @Override
                     public void changed(ChangeEvent event, Actor actor) {
                         shipEditor.setSelectedWeaponEquippedId(wd.id);
                         refreshSelectionUI();
+                        disposePickerTextures(previewTextures);
                         dialog.hide();
                     }
                 });
-                list.add(pick).growX().row();
+                row.add(pick).growX();
+                list.add(row).growX().width(420f).row();
             }
             ScrollPane scroll = new ScrollPane(list, skin);
             scroll.setFadeScrollBars(false);
             scroll.setScrollingDisabled(true, false);
-            dialog.getContentTable().add(scroll).width(420f).height(260f).row();
+            dialog.getContentTable().add(scroll).width(440f).height(260f).row();
         }
 
         TextButton clear = new TextButton("Clear slot", skin);
@@ -970,6 +1083,7 @@ public class ModdingScreen {
             public void changed(ChangeEvent event, Actor actor) {
                 shipEditor.setSelectedWeaponEquippedId(null);
                 refreshSelectionUI();
+                disposePickerTextures(previewTextures);
                 dialog.hide();
             }
         });
@@ -993,7 +1107,12 @@ public class ModdingScreen {
     }
 
     public void resize(int width, int height) {
-        shipEditor.resize(width, height);
+        if (mode == Mode.EDIT_SHIP) {
+            layoutShipEditorPanels();
+        } else {
+            shipEditor.setViewportInsets(0f, 0f, 0f, 0f);
+            shipEditor.resize(width, height);
+        }
     }
 
     public void dispose() {

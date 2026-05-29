@@ -29,9 +29,8 @@ public class GameWorld {
 
     private SpriteBatch spriteBatch; // For future use with textures and fonts
     private ShipData playerShipData;
-    /** Optional second hull template for mixed NPC spawns (falls back to fighter). */
-    private ShipData npcFrigateTemplate;
     private float playerShipRadius = 18f;
+    private final Array<ShipData> shipTemplates = new Array<>();
     private ProjectileManager projectileManager;
     private final ObjectMap<String, ShipData> shipDataById = new ObjectMap<>();
     private final ObjectMap<String, Texture> shipTextureCache = new ObjectMap<>();
@@ -54,16 +53,12 @@ public class GameWorld {
         spriteBatch.setProjectionMatrix(camera.combined);
         loadAllShipSprites();
         loadPlayerShip("fighter");
-        npcFrigateTemplate = shipDataById.get("frigate");
-        if (npcFrigateTemplate == null) {
-            npcFrigateTemplate = playerShipData;
-        }
-
         initialize();
     }
 
     private void loadAllShipSprites() {
         shipDataById.clear();
+        shipTemplates.clear();
         FileHandle modsDir = Gdx.files.local("mods");
         if (!modsDir.exists()) {
             return;
@@ -76,6 +71,7 @@ public class GameWorld {
                 ShipData data = ShipDataIO.loadFromJson(file);
                 if (data == null || data.id == null || data.id.isBlank()) continue;
                 shipDataById.put(data.id, data);
+                shipTemplates.add(data);
                 obtainShipTexture(data);
             }
         }
@@ -98,21 +94,29 @@ public class GameWorld {
             throw new IllegalStateException("No ship data available for player ship.");
         }
 
-        float spriteWidth = 20f;
-        float spriteHeight = 20f;
-        if (playerShipData.bounds != null && playerShipData.bounds.width > 0f && playerShipData.bounds.height > 0f) {
-            spriteWidth = playerShipData.bounds.width;
-            spriteHeight = playerShipData.bounds.height;
+        Texture hullTex = obtainShipTexture(playerShipData);
+        if (hullTex != null) {
+            playerShipRadius = ShipSpriteOrientation.hullRadiusFromTexture(hullTex.getWidth(), hullTex.getHeight());
         }
-        playerShipRadius = Math.max(spriteWidth, spriteHeight) * 0.5f;
     }
 
-    private static float npcRadiusFromShipData(ShipData data, float fallbackRadius) {
-        if (data == null || data.bounds == null) {
+    private float shipRadiusFromShipData(ShipData data, float fallbackRadius) {
+        if (data == null) {
             return fallbackRadius;
         }
-        if (data.bounds.width > 0f && data.bounds.height > 0f) {
-            return Math.max(data.bounds.width, data.bounds.height) * 0.5f;
+        if (data.colliders != null) {
+            float maxReach = 0f;
+            for (ShipColliderCircle c : data.colliders) {
+                float reach = (float) Math.sqrt(c.x * c.x + c.y * c.y) + c.radius;
+                maxReach = Math.max(maxReach, reach);
+            }
+            if (maxReach > 0f) {
+                return maxReach;
+            }
+        }
+        Texture tex = obtainShipTexture(data);
+        if (tex != null) {
+            return ShipSpriteOrientation.hullRadiusFromTexture(tex.getWidth(), tex.getHeight());
         }
         return fallbackRadius;
     }
@@ -136,8 +140,10 @@ public class GameWorld {
 
             GameObject orbitTarget = Math.random() > 0.5 ? planet : spaceStation;
 
-            ShipData template = (i % 2 == 0) ? playerShipData : npcFrigateTemplate;
-            float shipRadius = npcRadiusFromShipData(template, playerShipRadius);
+            ShipData template = shipTemplates.size > 0
+                ? shipTemplates.get(MathUtils.random(shipTemplates.size - 1))
+                : playerShipData;
+            float shipRadius = shipRadiusFromShipData(template, playerShipRadius);
 
             SpaceShip ship = new SpaceShip(
                 x,
@@ -167,20 +173,10 @@ public class GameWorld {
             ShipWeaponInstance inst = new ShipWeaponInstance(slot, wd);
             if (wd.turretSprite != null && !wd.turretSprite.isBlank()) {
                 Texture tex = obtainWeaponTexture(wd.turretSprite);
-                Texture hullTex = obtainShipTexture(data);
                 if (tex != null) {
                     inst.textureRef = tex;
                     Sprite turretSprite = new Sprite(tex);
-                    if (hullTex != null) {
-                        ShipSpriteOrientation.applyWeaponPixelScale(
-                            turretSprite,
-                            data.bounds,
-                            hullTex.getWidth(),
-                            hullTex.getHeight()
-                        );
-                    } else {
-                        turretSprite.setOriginCenter();
-                    }
+                    ShipSpriteOrientation.applyWeaponLayout(turretSprite);
                     inst.sprite = turretSprite;
                 }
             }
@@ -218,7 +214,6 @@ public class GameWorld {
         Sprite sprite = new Sprite(texture);
         ShipSpriteOrientation.applyHullLayout(
             sprite,
-            shipData.bounds,
             shipData.centerOfMass.x,
             shipData.centerOfMass.y,
             texture.getWidth(),

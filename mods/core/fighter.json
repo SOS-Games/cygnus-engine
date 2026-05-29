@@ -5,12 +5,7 @@
 "speed": 200,
 "maneuverability": 2,
 "cargoSpace": 2,
-"bounds": {
-	"x": -12,
-	"y": -18,
-	"width": 26,
-	"height": 35
-},
+"combatProfile": "FIGHTER",
 "colliders": [
 	{ "x": 0, "y": 14, "radius": 9 },
 	{ "x": 0, "y": -4, "radius": 12 },

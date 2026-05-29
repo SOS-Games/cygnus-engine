@@ -11,7 +11,6 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.MathUtils;
-import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ObjectMap;
@@ -30,6 +29,11 @@ public class ShipEditor {
     private static final float MIN_ZOOM = 0.2f;
     private static final float MAX_ZOOM = 3.0f;
 
+    private float insetLeft;
+    private float insetTop;
+    private float insetRight;
+    private float insetBottom;
+
     private ShapeRenderer shapeRenderer;
     private OrthographicCamera camera;
 
@@ -44,11 +48,9 @@ public class ShipEditor {
 
     private Vector2 selectedPoint = null; // COM / weapon / engine
     private PointOwner selectedPointOwner = PointOwner.NONE;
-    private CornerHandle selectedCorner = CornerHandle.NONE;
     private final Vector2 tmp2 = new Vector2();
 
     /** Editor overlay visibility — keeps the hull view uncluttered. */
-    private boolean layerBounds = true;
     private boolean layerWeapons = true;
     private boolean layerEngines = true;
     private boolean layerCom = true;
@@ -70,9 +72,7 @@ public class ShipEditor {
     private final Map<WeaponSlot, WeaponSlot> weaponMirrorPairs = new IdentityHashMap<>();
     private WeaponSlot selectedWeaponSlot;
     private final ObjectMap<String, Sprite> weaponPreviewSprites = new ObjectMap<>();
-    private final Vector2 hullPixelScale = new Vector2(1f, 1f);
 
-    private enum CornerHandle { NONE, BL, BR, TL, TR }
     private enum PointOwner { NONE, COM, WEAPON, ENGINE }
     private enum ColliderPick { NONE, CENTER, EDGE }
     private enum ColliderDragMode { NONE, CENTER, RADIUS_EDGE }
@@ -88,19 +88,6 @@ public class ShipEditor {
             if (shipData == null) return false;
 
             Vector2 mouseRel = screenToShipRelative(screenX, screenY);
-
-            if (layerBounds) {
-                CornerHandle corner = pickBoundsCorner(mouseRel);
-                if (corner != CornerHandle.NONE) {
-                    clearSelection();
-                    selectedCollider = null;
-                    colliderDrag = ColliderDragMode.NONE;
-                    selectedCorner = corner;
-                    return true;
-                }
-            }
-
-            selectedCorner = CornerHandle.NONE;
 
             if (layerWeapons) {
                 for (WeaponSlot slot : shipData.weaponSlots) {
@@ -161,7 +148,7 @@ public class ShipEditor {
             boolean draggingWeapon = selectedWeaponSlot != null && selectedPointOwner == PointOwner.WEAPON;
             boolean draggingCollider = selectedCollider != null && colliderDrag != ColliderDragMode.NONE;
 
-            if (selectedCorner == CornerHandle.NONE && selectedPoint == null && !draggingWeapon && !draggingCollider) {
+            if (selectedPoint == null && !draggingWeapon && !draggingCollider) {
                 return false;
             }
 
@@ -221,11 +208,6 @@ public class ShipEditor {
                 return true;
             }
 
-            if (selectedCorner != CornerHandle.NONE) {
-                resizeBoundsFromCorner(mouseRel, selectedCorner);
-                return true;
-            }
-
             return false;
         }
 
@@ -233,7 +215,6 @@ public class ShipEditor {
         public boolean touchUp(int screenX, int screenY, int pointer, int button) {
             if (shipData == null) return false;
 
-            selectedCorner = CornerHandle.NONE;
             colliderDrag = ColliderDragMode.NONE;
             updateHoverState(screenX, screenY);
             return false;
@@ -275,10 +256,6 @@ public class ShipEditor {
         return Math.max(1f, camera.zoom);
     }
 
-    public void setLayerBoundsVisible(boolean v) {
-        layerBounds = v;
-    }
-
     public void setLayerWeaponsVisible(boolean v) {
         layerWeapons = v;
     }
@@ -297,7 +274,6 @@ public class ShipEditor {
 
     /** Restore default layer visibility when opening a different ship. */
     public void resetLayerVisibility() {
-        layerBounds = true;
         layerWeapons = true;
         layerEngines = true;
         layerCom = true;
@@ -431,6 +407,13 @@ public class ShipEditor {
         drawOverlays();
     }
 
+    public void setViewportInsets(float left, float top, float right, float bottom) {
+        insetLeft = left;
+        insetTop = top;
+        insetRight = right;
+        insetBottom = bottom;
+    }
+
     public void resize(int width, int height) {
         float aspectRatio = (float) width / (float) height;
         float worldAspectRatio = WORLD_WIDTH / WORLD_HEIGHT;
@@ -443,7 +426,13 @@ public class ShipEditor {
             camera.viewportHeight = width / aspectRatio;
         }
 
-        camera.position.set(WORLD_WIDTH / 2f, WORLD_HEIGHT / 2f, 0);
+        float viewW = width - insetLeft - insetRight;
+        float viewH = height - insetTop - insetBottom;
+        float visibleCenterX = insetLeft + viewW * 0.5f;
+        float visibleCenterY = insetBottom + viewH * 0.5f;
+
+        camera.position.x = shipCenterWorld.x - (visibleCenterX - width * 0.5f) * camera.viewportWidth / width;
+        camera.position.y = shipCenterWorld.y - (visibleCenterY - height * 0.5f) * camera.viewportHeight / height;
 
         camera.update();
         spriteBatch.setProjectionMatrix(camera.combined);
@@ -512,22 +501,15 @@ public class ShipEditor {
         shipSprite = new Sprite(shipTexture);
     }
 
-    /** Match in-game hull sizing (bounds in ship-local space, nose = +Y). */
+    /** Match in-game hull layout (texture pixels as world units, nose = +Y). */
     private void configureHullSpriteForDraw() {
         if (shipSprite == null || shipData == null) return;
         ShipSpriteOrientation.applyHullLayout(
             shipSprite,
-            shipData.bounds,
             shipData.centerOfMass.x,
             shipData.centerOfMass.y,
             shipTexture.getWidth(),
             shipTexture.getHeight()
-        );
-        ShipSpriteOrientation.computeHullPixelScale(
-            shipData.bounds,
-            shipTexture.getWidth(),
-            shipTexture.getHeight(),
-            hullPixelScale
         );
     }
 
@@ -612,10 +594,11 @@ public class ShipEditor {
         if (shipData == null) return;
         ensureCollidersNonNull();
 
-        Rectangle b = shipData.bounds;
-        float rr = Math.max(6f, 0.2f * Math.min(b.width, b.height));
+        float halfW = shipTexture.getWidth() / 2f;
+        float halfH = shipTexture.getHeight() / 2f;
+        float rr = Math.max(6f, 0.2f * Math.min(halfW * 2f, halfH * 2f));
         float cx = rr + GRID_SIZE;
-        float cy = b.y + b.height * 0.5f;
+        float cy = 0f;
 
         ShipColliderCircle primary = new ShipColliderCircle(cx, cy, rr);
         shipData.colliders.add(primary);
@@ -639,9 +622,11 @@ public class ShipEditor {
     private Vector2 screenToShipRelative(int screenX, int screenY) {
         float clientX = Gdx.graphics.getWidth();
         float clientY = Gdx.graphics.getHeight();
+        float viewW = clientX - insetLeft - insetRight;
+        float viewH = clientY - insetTop - insetBottom;
 
         Vector3 clickedPos = new Vector3(screenX, screenY, 0);
-        Vector3 tmp3 = camera.unproject(clickedPos, 0.0f, 0.0f, clientX, clientY);
+        Vector3 tmp3 = camera.unproject(clickedPos, insetLeft, insetBottom, viewW, viewH);
 
         float worldX = tmp3.x;
         float worldY = tmp3.y;
@@ -652,21 +637,6 @@ public class ShipEditor {
     private void snap(Vector2 v) {
         v.x = Math.round(v.x / GRID_SIZE) * GRID_SIZE;
         v.y = Math.round(v.y / GRID_SIZE) * GRID_SIZE;
-    }
-
-    private CornerHandle pickBoundsCorner(Vector2 mouseRel) {
-        Rectangle b = shipData.bounds;
-        Vector2 bl = new Vector2(b.x, b.y);
-        Vector2 br = new Vector2(b.x + b.width, b.y);
-        Vector2 tl = new Vector2(b.x, b.y + b.height);
-        Vector2 tr = new Vector2(b.x + b.width, b.y + b.height);
-
-        float z = HANDLE_RADIUS * zoomFactor();
-        if (mouseRel.dst(bl) <= z) return CornerHandle.BL;
-        if (mouseRel.dst(br) <= z) return CornerHandle.BR;
-        if (mouseRel.dst(tl) <= z) return CornerHandle.TL;
-        if (mouseRel.dst(tr) <= z) return CornerHandle.TR;
-        return CornerHandle.NONE;
     }
 
     private ShipColliderCircle pickColliderCenter(Vector2 mouseRel) {
@@ -692,32 +662,6 @@ public class ShipEditor {
             }
         }
         return best;
-    }
-
-    private void resizeBoundsFromCorner(Vector2 mouseRel, CornerHandle corner) {
-        Rectangle b = shipData.bounds;
-        float left = b.x;
-        float right = b.x + b.width;
-        float bottom = b.y;
-        float top = b.y + b.height;
-
-        switch (corner) {
-            case BL -> { left = mouseRel.x; bottom = mouseRel.y; }
-            case BR -> { right = mouseRel.x; bottom = mouseRel.y; }
-            case TL -> { left = mouseRel.x; top = mouseRel.y; }
-            case TR -> { right = mouseRel.x; top = mouseRel.y; }
-            default -> {}
-        }
-
-        float newLeft = Math.min(left, right);
-        float newRight = Math.max(left, right);
-        float newBottom = Math.min(bottom, top);
-        float newTop = Math.max(bottom, top);
-
-        b.x = newLeft;
-        b.y = newBottom;
-        b.width = Math.max(1f, newRight - newLeft);
-        b.height = Math.max(1f, newTop - newBottom);
     }
 
     private void addPointWithOptionalMirror(List<Vector2> points, Vector2 point) {
@@ -824,24 +768,8 @@ public class ShipEditor {
 
     private void drawOverlays() {
         shapeRenderer.setProjectionMatrix(camera.combined);
-        Rectangle b = shipData.bounds;
 
         float circleRadius = 4f * camera.zoom;
-
-        if (layerBounds) {
-            shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
-            shapeRenderer.setColor(Color.GREEN);
-            shapeRenderer.rect(shipCenterWorld.x + b.x, shipCenterWorld.y + b.y, b.width, b.height);
-            shapeRenderer.end();
-
-            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-            shapeRenderer.setColor(Color.GREEN);
-            shapeRenderer.circle(shipCenterWorld.x + b.x, shipCenterWorld.y + b.y, circleRadius);
-            shapeRenderer.circle(shipCenterWorld.x + b.x + b.width, shipCenterWorld.y + b.y, circleRadius);
-            shapeRenderer.circle(shipCenterWorld.x + b.x, shipCenterWorld.y + b.y + b.height, circleRadius);
-            shapeRenderer.circle(shipCenterWorld.x + b.x + b.width, shipCenterWorld.y + b.y + b.height, circleRadius);
-            shapeRenderer.end();
-        }
 
         if (layerColliders) {
             shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
@@ -951,7 +879,7 @@ public class ShipEditor {
             if (weaponSprite == null) continue;
             float wx = shipCenterWorld.x + slot.x;
             float wy = shipCenterWorld.y + slot.y;
-            ShipSpriteOrientation.applyWeaponPixelScale(weaponSprite, hullPixelScale.x, hullPixelScale.y);
+            ShipSpriteOrientation.applyWeaponLayout(weaponSprite);
             weaponSprite.setCenter(wx, wy);
             weaponSprite.setRotation(ShipSpriteOrientation.editorSpriteRotation());
             weaponSprite.draw(batch);
