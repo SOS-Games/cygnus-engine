@@ -393,7 +393,13 @@ public class SpaceShip extends GameObject {
     }
 
     private void refreshWorldTransformAndMountCaches() {
-        worldTransform.setToTrnRotScl(getX(), getY(), getRotation(), 1f, 1f);
+        worldTransform.setToTrnRotScl(
+            getX(),
+            getY(),
+            ShipSpriteOrientation.gameAngleToLocalTransformRotation(getRotation()),
+            1f,
+            1f
+        );
         for (ShipWeaponInstance weaponInstance : weaponInstances) {
             weaponInstance.updateWorldPosition(worldTransform);
         }

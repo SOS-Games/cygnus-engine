@@ -23,6 +23,8 @@ import com.badlogic.gdx.utils.viewport.ScreenViewport;
 // add a dynamic faction system
 // have a FTL-like text screen which allows handling "events"
 
+// a preview of the modding system weapon projectiles as they fire
+
 /** {@link com.badlogic.gdx.ApplicationListener} implementation shared by all platforms. */
 public class Main extends ApplicationAdapter {
     // Screen states

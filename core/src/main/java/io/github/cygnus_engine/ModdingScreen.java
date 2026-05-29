@@ -1,6 +1,10 @@
 package io.github.cygnus_engine;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.scenes.scene2d.ui.Image;
+import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -53,6 +57,11 @@ public class ModdingScreen {
     private Label mountEditorInfoLabel;
     private TextButton slotTypeToggleButton;
     private TextButton equipWeaponButton;
+    private TextButton deleteSelectionButton;
+    private Table mountActionsRow;
+
+    private Texture weaponPreviewTexture;
+    private Image weaponPreviewImage;
 
     private TextField weaponNameField;
     private TextField weaponTypeField;
@@ -345,7 +354,7 @@ public class ModdingScreen {
             }
         });
 
-        slotTypeToggleButton = new TextButton("Slot type: —", skin);
+        slotTypeToggleButton = new TextButton("Toggle slot type", skin);
         slotTypeToggleButton.addListener(new ChangeListener() {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
@@ -355,7 +364,7 @@ public class ModdingScreen {
                     ? WeaponSlot.SlotType.HARDPOINT
                     : WeaponSlot.SlotType.TURRET;
                 shipEditor.setSelectedWeaponSlotType(next);
-                refreshMountEditorLabels();
+                refreshSelectionUI();
             }
         });
 
@@ -364,6 +373,16 @@ public class ModdingScreen {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 openEquipWeaponDialog();
+            }
+        });
+
+        deleteSelectionButton = new TextButton("Delete selected", skin);
+        deleteSelectionButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (shipEditor.deleteSelected()) {
+                    refreshSelectionUI();
+                }
             }
         });
 
@@ -405,12 +424,17 @@ public class ModdingScreen {
         editorWindow.add(backButton).left();
         editorWindow.add(changeTextureButton);
         editorWindow.add(addWeaponButton);
-        editorWindow.add(slotTypeToggleButton);
-        editorWindow.add(equipWeaponButton);
         editorWindow.add(addEngineButton);
         editorWindow.add(addColliderButton);
         editorWindow.add(symmetryButton);
         editorWindow.add(saveButton).right().row();
+
+        mountActionsRow = new Table(skin);
+        mountActionsRow.defaults().pad(4f);
+        mountActionsRow.add(equipWeaponButton).padRight(8f);
+        mountActionsRow.add(slotTypeToggleButton).padRight(8f);
+        mountActionsRow.add(deleteSelectionButton);
+        editorWindow.add(mountActionsRow).left().padTop(4f).row();
 
         Table layerToggles = new Table(skin);
         layerToggles.defaults().pad(4f).left();
@@ -442,15 +466,16 @@ public class ModdingScreen {
 
         mountEditorInfoLabel = new Label("", skin);
         mountEditorInfoLabel.setWrap(true);
-        refreshMountEditorLabels();
+        refreshSelectionUI();
         editorWindow.add(mountEditorInfoLabel).left().width(720f).row();
 
-        editorWindow.add(new Label("Mounts: red = turret, magenta = hardpoint. Drag mounts on the hull; select a mount to change type or equip a weapon from mods/*/weapons/*.json.", skin)).left().width(720f).row();
+        editorWindow.add(new Label("Selected handles show a white ring. Delete removes weapon slots, engines, or colliders (not COM).", skin)).left().width(720f).row();
         editorWindow.add(new Label("Colliders: cyan circles — drag centers to move, drag circumference to resize. Symmetry duplicates paired circles.", skin)).left().width(720f).row();
 
         editorWindow.pack();
         editorWindow.setPosition(10f, Math.max(10f, stage.getHeight() - editorWindow.getHeight() - 10f));
         stage.addActor(editorWindow);
+        refreshSelectionUI();
     }
 
     private void openHullTexturePickerDialog() {
@@ -672,6 +697,7 @@ public class ModdingScreen {
 
     private void buildWeaponEditorUI() {
         if (weaponEditorWindow != null) weaponEditorWindow.remove();
+        disposeWeaponPreviewTexture();
 
         weaponEditorWindow = new Window("Edit Weapon — " + editingWeapon.id, skin, "border");
         weaponEditorWindow.defaults().pad(6f);
@@ -696,6 +722,22 @@ public class ModdingScreen {
 
         weaponEditorWindow.add(backButton).left();
         weaponEditorWindow.add(saveButton).right().row();
+
+        Table previewRow = new Table(skin);
+        previewRow.defaults().pad(6f);
+        weaponPreviewImage = new Image();
+        previewRow.add(new Label("Sprite preview", skin)).top().left().padRight(8f);
+        previewRow.add(weaponPreviewImage).size(96f, 96f).top().left();
+        weaponEditorWindow.add(previewRow).left().row();
+
+        TextButton pickSpriteButton = new TextButton("Pick sprite PNG…", skin);
+        pickSpriteButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                openWeaponSpritePickerDialog();
+            }
+        });
+        weaponEditorWindow.add(pickSpriteButton).left().padBottom(6f).row();
 
         weaponNameField = new TextField(editingWeapon.name, skin);
         weaponTypeField = new TextField(editingWeapon.type, skin);
@@ -740,9 +782,69 @@ public class ModdingScreen {
         t.add(weaponHardpointCompatCheck).colspan(2).left().row();
 
         weaponEditorWindow.add(t).left().row();
+        refreshWeaponPreviewImage();
         weaponEditorWindow.pack();
         weaponEditorWindow.setPosition(10f, Math.max(10f, stage.getHeight() - weaponEditorWindow.getHeight() - 10f));
         stage.addActor(weaponEditorWindow);
+    }
+
+    private void openWeaponSpritePickerDialog() {
+        Dialog dialog = new Dialog("Pick weapon sprite PNG", skin, "dialog") {
+            @Override
+            protected void result(Object object) {
+            }
+        };
+        dialog.getContentTable().defaults().pad(4f).growX();
+        ArrayList<FileHandle> pngs = collectTexturePngFiles();
+        if (pngs.isEmpty()) {
+            dialog.getContentTable().add(new Label("No PNG files found under mods/.", skin)).row();
+        } else {
+            Table list = new Table(skin);
+            for (FileHandle fh : pngs) {
+                TextButton row = new TextButton(fh.path(), skin);
+                row.getLabel().setWrap(true);
+                row.addListener(new ChangeListener() {
+                    @Override
+                    public void changed(ChangeEvent event, Actor actor) {
+                        weaponTurretSpriteField.setText(fh.path());
+                        refreshWeaponPreviewImage();
+                        dialog.hide();
+                    }
+                });
+                list.add(row).growX().width(560f).row();
+            }
+            ScrollPane scroll = new ScrollPane(list, skin);
+            scroll.setFadeScrollBars(false);
+            scroll.setScrollingDisabled(true, false);
+            dialog.getContentTable().add(scroll).width(580f).height(320f).row();
+        }
+        dialog.button("Close", true);
+        dialog.show(stage);
+    }
+
+    private void refreshWeaponPreviewImage() {
+        if (weaponPreviewImage == null) return;
+        disposeWeaponPreviewTexture();
+        String path = weaponTurretSpriteField != null ? weaponTurretSpriteField.getText().trim() : editingWeapon.turretSprite;
+        if (path == null || path.isBlank()) {
+            weaponPreviewImage.setDrawable(null);
+            return;
+        }
+        FileHandle fh = WeaponDataIO.resolveTextureFile(path);
+        if (fh == null || !fh.exists()) {
+            weaponPreviewImage.setDrawable(null);
+            return;
+        }
+        weaponPreviewTexture = new Texture(fh);
+        weaponPreviewTexture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        weaponPreviewImage.setDrawable(new TextureRegionDrawable(new TextureRegion(weaponPreviewTexture)));
+    }
+
+    private void disposeWeaponPreviewTexture() {
+        if (weaponPreviewTexture != null) {
+            weaponPreviewTexture.dispose();
+            weaponPreviewTexture = null;
+        }
     }
 
     private void applyWeaponFieldsToData() {
@@ -802,17 +904,30 @@ public class ModdingScreen {
         return cb;
     }
 
-    private void refreshMountEditorLabels() {
-        if (mountEditorInfoLabel == null || slotTypeToggleButton == null) return;
-        WeaponSlot s = shipEditor.getSelectedWeaponSlot();
-        if (s == null) {
-            mountEditorInfoLabel.setText("Weapon slot: none selected (click a mount handle).");
-            slotTypeToggleButton.setText("Slot type: —");
-            return;
+    private void refreshSelectionUI() {
+        if (mountEditorInfoLabel != null) {
+            mountEditorInfoLabel.setText(shipEditor.getSelectionSummary());
         }
-        String eq = s.equippedWeaponId == null || s.equippedWeaponId.isBlank() ? "(empty)" : s.equippedWeaponId;
-        mountEditorInfoLabel.setText("Selected " + s.id + " at (" + (int) s.x + ", " + (int) s.y + ") — " + s.type + " — equipped: " + eq);
-        slotTypeToggleButton.setText("Slot type: " + s.type + " (click to toggle)");
+        boolean weaponSelected = shipEditor.getSelectionKind() == ShipEditor.SelectionKind.WEAPON;
+        if (equipWeaponButton != null) {
+            equipWeaponButton.setVisible(weaponSelected);
+        }
+        if (slotTypeToggleButton != null) {
+            slotTypeToggleButton.setVisible(weaponSelected);
+        }
+        boolean canDelete = shipEditor.getSelectionKind() == ShipEditor.SelectionKind.WEAPON
+            || shipEditor.getSelectionKind() == ShipEditor.SelectionKind.ENGINE
+            || shipEditor.getSelectionKind() == ShipEditor.SelectionKind.COLLIDER;
+        if (deleteSelectionButton != null) {
+            deleteSelectionButton.setVisible(canDelete);
+        }
+        if (mountActionsRow != null) {
+            mountActionsRow.setVisible(weaponSelected || canDelete);
+        }
+    }
+
+    private void refreshMountEditorLabels() {
+        refreshSelectionUI();
     }
 
     private void openEquipWeaponDialog() {
@@ -837,7 +952,7 @@ public class ModdingScreen {
                     @Override
                     public void changed(ChangeEvent event, Actor actor) {
                         shipEditor.setSelectedWeaponEquippedId(wd.id);
-                        refreshMountEditorLabels();
+                        refreshSelectionUI();
                         dialog.hide();
                     }
                 });
@@ -854,7 +969,7 @@ public class ModdingScreen {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 shipEditor.setSelectedWeaponEquippedId(null);
-                refreshMountEditorLabels();
+                refreshSelectionUI();
                 dialog.hide();
             }
         });
@@ -867,7 +982,7 @@ public class ModdingScreen {
     public void update(float deltaTime) {
         if (mode == Mode.EDIT_SHIP) {
             shipEditor.update(deltaTime);
-            refreshMountEditorLabels();
+            refreshSelectionUI();
         }
     }
 
@@ -882,6 +997,7 @@ public class ModdingScreen {
     }
 
     public void dispose() {
+        disposeWeaponPreviewTexture();
         shipEditor.dispose();
     }
 }

@@ -167,11 +167,20 @@ public class GameWorld {
             ShipWeaponInstance inst = new ShipWeaponInstance(slot, wd);
             if (wd.turretSprite != null && !wd.turretSprite.isBlank()) {
                 Texture tex = obtainWeaponTexture(wd.turretSprite);
+                Texture hullTex = obtainShipTexture(data);
                 if (tex != null) {
                     inst.textureRef = tex;
                     Sprite turretSprite = new Sprite(tex);
-                    turretSprite.setOriginCenter();
-                    turretSprite.rotate90(true);
+                    if (hullTex != null) {
+                        ShipSpriteOrientation.applyWeaponPixelScale(
+                            turretSprite,
+                            data.bounds,
+                            hullTex.getWidth(),
+                            hullTex.getHeight()
+                        );
+                    } else {
+                        turretSprite.setOriginCenter();
+                    }
                     inst.sprite = turretSprite;
                 }
             }
@@ -207,18 +216,14 @@ public class GameWorld {
         }
 
         Sprite sprite = new Sprite(texture);
-        float spriteWidth = 20f;
-        float spriteHeight = 20f;
-        if (shipData.bounds != null && shipData.bounds.width > 0f && shipData.bounds.height > 0f) {
-            spriteWidth = shipData.bounds.width;
-            spriteHeight = shipData.bounds.height;
-        }
-        sprite.setSize(spriteHeight, spriteWidth);
-        sprite.setOrigin(
-            sprite.getWidth() * 0.5f + shipData.centerOfMass.x,
-            sprite.getHeight() * 0.5f + shipData.centerOfMass.y
+        ShipSpriteOrientation.applyHullLayout(
+            sprite,
+            shipData.bounds,
+            shipData.centerOfMass.x,
+            shipData.centerOfMass.y,
+            texture.getWidth(),
+            texture.getHeight()
         );
-        sprite.rotate90(true);
         return sprite;
     }
 
@@ -300,7 +305,7 @@ public class GameWorld {
                     spriteBatch.begin();
                     if (hullSprite != null) {
                         hullSprite.setPosition(obj.getX() - hullSprite.getOriginX(), obj.getY() - hullSprite.getOriginY());
-                        hullSprite.setRotation(obj.getRotation());
+                        hullSprite.setRotation(ShipSpriteOrientation.gameAngleToSpriteRotation(obj.getRotation()));
                         hullSprite.draw(spriteBatch);
                     }
 
@@ -308,7 +313,7 @@ public class GameWorld {
                         if (w.sprite == null) continue;
 
                         w.sprite.setCenter(w.worldPosCache.x, w.worldPosCache.y);
-                        w.sprite.setRotation(w.aimAngleDeg);
+                        w.sprite.setRotation(ShipSpriteOrientation.gameAngleToSpriteRotation(w.aimAngleDeg));
                         w.sprite.draw(spriteBatch);
                     }
                     spriteBatch.end();
