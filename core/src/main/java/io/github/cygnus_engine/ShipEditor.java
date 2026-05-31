@@ -23,7 +23,7 @@ public class ShipEditor {
 
     private static final float WORLD_WIDTH = 800f;
     private static final float WORLD_HEIGHT = 600f;
-    private static final float HANDLE_RADIUS = 8f;
+    private static final float HANDLE_RADIUS = 2f;
     private static final float GRID_SIZE = 1f;
     private static final float ZOOM_SPEED = 0.1f;
     private static final float MIN_ZOOM = 0.2f;
@@ -274,7 +274,7 @@ public class ShipEditor {
 
             float nextZoom = camera.zoom + amountY * ZOOM_SPEED;
             camera.zoom = MathUtils.clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
-            camera.update();
+            updateEditorCamera(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             return true;
         }
     };
@@ -474,6 +474,11 @@ public class ShipEditor {
     }
 
     public void resize(int width, int height) {
+        updateEditorCamera(width, height);
+    }
+
+    /** Keep {@link #shipCenterWorld} pinned to the center of the visible editor area (insets + zoom). */
+    private void updateEditorCamera(int width, int height) {
         float aspectRatio = (float) width / (float) height;
         float worldAspectRatio = WORLD_WIDTH / WORLD_HEIGHT;
 
@@ -490,8 +495,11 @@ public class ShipEditor {
         float visibleCenterX = insetLeft + viewW * 0.5f;
         float visibleCenterY = insetBottom + viewH * 0.5f;
 
-        camera.position.x = shipCenterWorld.x - (visibleCenterX - width * 0.5f) * camera.viewportWidth / width;
-        camera.position.y = shipCenterWorld.y - (visibleCenterY - height * 0.5f) * camera.viewportHeight / height;
+        float worldPerPixelX = camera.viewportWidth * camera.zoom / width;
+        float worldPerPixelY = camera.viewportHeight * camera.zoom / height;
+
+        camera.position.x = shipCenterWorld.x - (visibleCenterX - width * 0.5f) * worldPerPixelX;
+        camera.position.y = shipCenterWorld.y - (visibleCenterY - height * 0.5f) * worldPerPixelY;
 
         camera.update();
         spriteBatch.setProjectionMatrix(camera.combined);
@@ -683,11 +691,9 @@ public class ShipEditor {
     private Vector2 screenToShipRelative(int screenX, int screenY) {
         float clientX = Gdx.graphics.getWidth();
         float clientY = Gdx.graphics.getHeight();
-        float viewW = clientX - insetLeft - insetRight;
-        float viewH = clientY - insetTop - insetBottom;
 
         Vector3 clickedPos = new Vector3(screenX, screenY, 0);
-        Vector3 tmp3 = camera.unproject(clickedPos, insetLeft, insetBottom, viewW, viewH);
+        Vector3 tmp3 = camera.unproject(clickedPos, 0f, 0f, clientX, clientY);
 
         float worldX = tmp3.x;
         float worldY = tmp3.y;
