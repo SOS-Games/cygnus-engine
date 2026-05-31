@@ -494,7 +494,8 @@ public class ModdingScreen {
         layerToggles.add(makeLayerCheckbox("Weapons", true, shipEditor::setLayerWeaponsVisible)).left().row();
         layerToggles.add(makeLayerCheckbox("Engines", true, shipEditor::setLayerEnginesVisible)).left().row();
         layerToggles.add(makeLayerCheckbox("COM", true, shipEditor::setLayerCenterOfMassVisible)).left().row();
-        layerToggles.add(makeLayerCheckbox("Colliders", true, shipEditor::setLayerCollidersVisible)).left().row();
+        layerToggles.add(makeLayerCheckbox("Hit colliders", true, shipEditor::setLayerCollidersVisible)).left().row();
+        layerToggles.add(makeLayerCheckbox("Click bounds", true, shipEditor::setLayerClickBoundsVisible)).left().row();
         editorLeftPanel.add(layerToggles).left().padBottom(8f).row();
 
         ShipData d = shipEditor.getShipData();
@@ -735,6 +736,7 @@ public class ModdingScreen {
         d.normalizeWeaponSlots();
         d.normalizeCombatProfile();
         d.normalizeColliders();
+        d.normalizeOuterBounds();
         return d;
     }
 
@@ -1019,11 +1021,12 @@ public class ModdingScreen {
         boolean canDelete = shipEditor.getSelectionKind() == ShipEditor.SelectionKind.WEAPON
             || shipEditor.getSelectionKind() == ShipEditor.SelectionKind.ENGINE
             || shipEditor.getSelectionKind() == ShipEditor.SelectionKind.COLLIDER;
+        boolean outerBoundsSelected = shipEditor.getSelectionKind() == ShipEditor.SelectionKind.OUTER_BOUNDS;
         if (deleteSelectionButton != null) {
             deleteSelectionButton.setVisible(canDelete);
         }
         if (mountActionsRow != null) {
-            mountActionsRow.setVisible(weaponSelected || canDelete);
+            mountActionsRow.setVisible(weaponSelected || canDelete || outerBoundsSelected);
         }
     }
 

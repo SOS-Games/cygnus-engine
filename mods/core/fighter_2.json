@@ -2,7 +2,7 @@
 "id": "fighter_2",
 "name": "fighter_2",
 "texturePath": "mods/core/heavy fighter 3.png",
-"speed": 120,
+"speed": 80,
 "maneuverability": 2,
 "cargoSpace": 2,
 "centerOfMass": {
@@ -41,5 +41,8 @@
 		"x": 1,
 		"radius": 14.4
 	}
-]
+],
+"outerBounds": {
+	"radius": 28
+}
 }

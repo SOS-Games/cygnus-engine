@@ -36,6 +36,7 @@ public final class ShipDataIO {
         data.normalizeWeaponSlots();
         data.normalizeCombatProfile();
         data.normalizeColliders();
+        data.normalizeOuterBounds();
 
         return data;
     }
@@ -55,6 +56,7 @@ public final class ShipDataIO {
         data.normalizeWeaponSlots();
         data.normalizeCombatProfile();
         data.normalizeColliders();
+        data.normalizeOuterBounds();
         return data;
     }
 
@@ -62,6 +64,7 @@ public final class ShipDataIO {
         if (data == null) throw new IllegalArgumentException("ShipData must not be null");
         if (targetJsonFile == null) throw new IllegalArgumentException("targetJsonFile must not be null");
 
+        data.normalizeOuterBounds();
         targetJsonFile.parent().mkdirs();
         String text = newJson().prettyPrint(data);
         targetJsonFile.writeString(text, false, "UTF-8");

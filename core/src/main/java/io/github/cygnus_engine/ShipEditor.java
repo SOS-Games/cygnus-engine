@@ -55,6 +55,7 @@ public class ShipEditor {
     private boolean layerEngines = true;
     private boolean layerCom = true;
     private boolean layerColliders = true;
+    private boolean layerClickBounds = true;
 
     private boolean symmetryEnabled = true;
     private final Vector2 hoveredMouseRel = new Vector2();
@@ -66,6 +67,8 @@ public class ShipEditor {
     private ShipColliderCircle hoveredColliderCircle = null;
     private ShipColliderCircle selectedCollider = null;
     private ColliderDragMode colliderDrag = ColliderDragMode.NONE;
+    private ColliderDragMode outerBoundsDrag = ColliderDragMode.NONE;
+    private ColliderPick hoveredOuterBoundsPick = ColliderPick.NONE;
 
     private final Map<ShipColliderCircle, ShipColliderCircle> colliderMirrorPairs = new IdentityHashMap<>();
 
@@ -78,7 +81,7 @@ public class ShipEditor {
     private enum ColliderDragMode { NONE, CENTER, RADIUS_EDGE }
 
     /** Persistent editor selection (survives mouse release). */
-    public enum SelectionKind { NONE, WEAPON, ENGINE, COM, COLLIDER }
+    public enum SelectionKind { NONE, WEAPON, ENGINE, COM, COLLIDER, OUTER_BOUNDS }
 
     private SelectionKind selectionKind = SelectionKind.NONE;
 
@@ -111,10 +114,32 @@ public class ShipEditor {
                 }
             }
 
+            if (layerClickBounds && shipData.outerBounds != null) {
+                ShipColliderCircle ob = shipData.outerBounds;
+                float pickRadius = HANDLE_RADIUS * zoomFactor();
+                if (mouseRel.dst(ob.x, ob.y) <= pickRadius) {
+                    selectOuterBounds();
+                    selectedCollider = null;
+                    colliderDrag = ColliderDragMode.NONE;
+                    outerBoundsDrag = ColliderDragMode.CENTER;
+                    return true;
+                }
+                float edgeTol = 10f * zoomFactor();
+                float dist = mouseRel.dst(ob.x, ob.y);
+                if (dist > pickRadius + 2f && Math.abs(dist - ob.radius) <= edgeTol) {
+                    selectOuterBounds();
+                    selectedCollider = null;
+                    colliderDrag = ColliderDragMode.NONE;
+                    outerBoundsDrag = ColliderDragMode.RADIUS_EDGE;
+                    return true;
+                }
+            }
+
             if (layerColliders) {
                 ShipColliderCircle centerHit = pickColliderCenter(mouseRel);
                 if (centerHit != null) {
                     selectCollider(centerHit);
+                    outerBoundsDrag = ColliderDragMode.NONE;
                     colliderDrag = ColliderDragMode.CENTER;
                     return true;
                 }
@@ -122,6 +147,7 @@ public class ShipEditor {
                 ShipColliderCircle edgeHit = pickColliderEdge(mouseRel);
                 if (edgeHit != null) {
                     selectCollider(edgeHit);
+                    outerBoundsDrag = ColliderDragMode.NONE;
                     colliderDrag = ColliderDragMode.RADIUS_EDGE;
                     return true;
                 }
@@ -129,6 +155,7 @@ public class ShipEditor {
 
             selectedCollider = null;
             colliderDrag = ColliderDragMode.NONE;
+            outerBoundsDrag = ColliderDragMode.NONE;
 
             if (layerCom) {
                 if (mouseRel.dst(shipData.centerOfMass) <= HANDLE_RADIUS * zoomFactor()) {
@@ -147,8 +174,9 @@ public class ShipEditor {
 
             boolean draggingWeapon = selectedWeaponSlot != null && selectedPointOwner == PointOwner.WEAPON;
             boolean draggingCollider = selectedCollider != null && colliderDrag != ColliderDragMode.NONE;
+            boolean draggingOuterBounds = selectionKind == SelectionKind.OUTER_BOUNDS && outerBoundsDrag != ColliderDragMode.NONE;
 
-            if (selectedPoint == null && !draggingWeapon && !draggingCollider) {
+            if (selectedPoint == null && !draggingWeapon && !draggingCollider && !draggingOuterBounds) {
                 return false;
             }
 
@@ -193,6 +221,17 @@ public class ShipEditor {
                 return true;
             }
 
+            if (draggingOuterBounds && shipData.outerBounds != null) {
+                ShipColliderCircle ob = shipData.outerBounds;
+                if (outerBoundsDrag == ColliderDragMode.CENTER) {
+                    ob.x = mouseRel.x;
+                    ob.y = mouseRel.y;
+                } else if (outerBoundsDrag == ColliderDragMode.RADIUS_EDGE) {
+                    ob.radius = Math.max(GRID_SIZE, Math.round(mouseRel.dst(ob.x, ob.y)));
+                }
+                return true;
+            }
+
             if (selectedPoint != null) {
                 selectedPoint.set(mouseRel);
                 if (symmetryEnabled && selectedPointOwner != PointOwner.COM) {
@@ -216,6 +255,7 @@ public class ShipEditor {
             if (shipData == null) return false;
 
             colliderDrag = ColliderDragMode.NONE;
+            outerBoundsDrag = ColliderDragMode.NONE;
             updateHoverState(screenX, screenY);
             return false;
         }
@@ -272,12 +312,17 @@ public class ShipEditor {
         layerColliders = v;
     }
 
+    public void setLayerClickBoundsVisible(boolean v) {
+        layerClickBounds = v;
+    }
+
     /** Restore default layer visibility when opening a different ship. */
     public void resetLayerVisibility() {
         layerWeapons = true;
         layerEngines = true;
         layerCom = true;
         layerColliders = true;
+        layerClickBounds = true;
     }
 
     public void clearSelection() {
@@ -310,14 +355,20 @@ public class ShipEditor {
             case COM -> "Center of mass at (" + (int) shipData.centerOfMass.x + ", " + (int) shipData.centerOfMass.y + ")";
             case COLLIDER -> {
                 if (selectedCollider == null) yield "Collider (invalid selection).";
-                yield "Collider at (" + (int) selectedCollider.x + ", " + (int) selectedCollider.y + ") r=" + (int) selectedCollider.radius;
+                yield "Hit collider at (" + (int) selectedCollider.x + ", " + (int) selectedCollider.y + ") r=" + (int) selectedCollider.radius;
+            }
+            case OUTER_BOUNDS -> {
+                ShipColliderCircle ob = shipData.outerBounds;
+                if (ob == null) yield "Click bounds (invalid selection).";
+                yield "Click bounds at (" + (int) ob.x + ", " + (int) ob.y + ") r=" + (int) ob.radius + " (required)";
             }
             default -> "Nothing selected.";
         };
     }
 
     public boolean deleteSelected() {
-        if (shipData == null || selectionKind == SelectionKind.NONE || selectionKind == SelectionKind.COM) {
+        if (shipData == null || selectionKind == SelectionKind.NONE
+            || selectionKind == SelectionKind.COM || selectionKind == SelectionKind.OUTER_BOUNDS) {
             return false;
         }
         switch (selectionKind) {
@@ -379,6 +430,14 @@ public class ShipEditor {
     private void selectCollider(ShipColliderCircle c) {
         selectionKind = SelectionKind.COLLIDER;
         selectedCollider = c;
+        selectedPoint = null;
+        selectedWeaponSlot = null;
+        selectedPointOwner = PointOwner.NONE;
+    }
+
+    private void selectOuterBounds() {
+        selectionKind = SelectionKind.OUTER_BOUNDS;
+        selectedCollider = null;
         selectedPoint = null;
         selectedWeaponSlot = null;
         selectedPointOwner = PointOwner.NONE;
@@ -474,6 +533,7 @@ public class ShipEditor {
         }
         reloadHullTexture();
         ensureDefaultColliders();
+        ensureDefaultOuterBounds();
         rebuildColliderMirrorPairs();
         rebuildWeaponMirrorPairs();
         Gdx.app.log("ShipEditor", "Loaded ship JSON: " + jsonFile.path());
@@ -484,6 +544,7 @@ public class ShipEditor {
         if (shipData == null) return;
         reloadHullTexture();
         ensureDefaultColliders();
+        ensureDefaultOuterBounds();
         rebuildColliderMirrorPairs();
     }
 
@@ -686,6 +747,20 @@ public class ShipEditor {
         shipData.colliders.add(new ShipColliderCircle(0f, 0f, r));
     }
 
+    private void ensureDefaultOuterBounds() {
+        if (shipData == null) return;
+        shipData.normalizeColliders();
+        shipData.normalizeOuterBounds();
+        if (shipData.outerBounds.radius > 0f) {
+            return;
+        }
+        if (shipTexture != null) {
+            float halfW = shipTexture.getWidth() / 2f;
+            float halfH = shipTexture.getHeight() / 2f;
+            shipData.outerBounds.set(0f, 0f, Math.max(halfW, halfH));
+        }
+    }
+
     private void rebuildColliderMirrorPairs() {
         colliderMirrorPairs.clear();
         if (shipData == null || shipData.colliders == null) return;
@@ -724,6 +799,7 @@ public class ShipEditor {
         hoveredColliderPick = ColliderPick.NONE;
         hoveredColliderCircle = null;
         hoveredWeaponSlot = null;
+        hoveredOuterBoundsPick = ColliderPick.NONE;
 
         float pointSearchRadius = HANDLE_RADIUS * zoomFactor();
 
@@ -759,6 +835,20 @@ public class ShipEditor {
             }
         }
 
+        if (layerClickBounds && shipData.outerBounds != null) {
+            ShipColliderCircle ob = shipData.outerBounds;
+            float z = HANDLE_RADIUS * zoomFactor();
+            if (hoveredMouseRel.dst(ob.x, ob.y) <= z) {
+                hoveredOuterBoundsPick = ColliderPick.CENTER;
+                return;
+            }
+            float edgeTol = 10f * zoomFactor();
+            float dist = hoveredMouseRel.dst(ob.x, ob.y);
+            if (dist > z + 2f && Math.abs(dist - ob.radius) <= edgeTol) {
+                hoveredOuterBoundsPick = ColliderPick.EDGE;
+            }
+        }
+
         if (layerCom) {
             if (hoveredMouseRel.dst(shipData.centerOfMass) <= pointSearchRadius) {
                 hoveredPoint = shipData.centerOfMass;
@@ -770,6 +860,24 @@ public class ShipEditor {
         shapeRenderer.setProjectionMatrix(camera.combined);
 
         float circleRadius = 4f * camera.zoom;
+
+        if (layerClickBounds && shipData.outerBounds != null) {
+            ShipColliderCircle ob = shipData.outerBounds;
+            boolean selected = selectionKind == SelectionKind.OUTER_BOUNDS;
+            boolean hoveredCenter = hoveredOuterBoundsPick == ColliderPick.CENTER;
+            boolean hoveredEdge = hoveredOuterBoundsPick == ColliderPick.EDGE;
+
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+            shapeRenderer.setColor(selected || hoveredCenter || hoveredEdge ? Color.WHITE : Color.GREEN);
+            shapeRenderer.circle(shipCenterWorld.x + ob.x, shipCenterWorld.y + ob.y, ob.radius);
+            shapeRenderer.end();
+
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+            shapeRenderer.setColor(Color.GREEN);
+            float pr = selected ? circleRadius * 1.8f : (hoveredCenter ? circleRadius * 1.4f : circleRadius);
+            shapeRenderer.circle(shipCenterWorld.x + ob.x, shipCenterWorld.y + ob.y, pr);
+            shapeRenderer.end();
+        }
 
         if (layerColliders) {
             shapeRenderer.begin(ShapeRenderer.ShapeType.Line);

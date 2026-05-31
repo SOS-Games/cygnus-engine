@@ -8,8 +8,8 @@
 "combatProfile": "FRIGATE",
 "orbitCombatRadius": 215,
 "orbitCombatBand": 48,
-  "hullTurnDegPerSec": 68,
-  "weaponSlots": [
+"hullTurnDegPerSec": 68,
+"weaponSlots": [
 	{
 		"id": "top_turret",
 		"y": 18,
@@ -49,5 +49,8 @@
 		"y": 2,
 		"radius": 9
 	}
-]
+],
+"outerBounds": {
+	"radius": 23
+}
 }

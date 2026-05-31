@@ -2,12 +2,37 @@
 "id": "light frigate 1",
 "name": "light frigate 1",
 "texturePath": "mods/core/medium fighter 4.png",
+"speed": 100,
+"maneuverability": 5,
+"cargoSpace": 5,
 "combatProfile": "FRIGATE",
+"centerOfMass": {
+	"x": 1,
+	"y": -2
+},
+"weaponSlots": [
+	{
+		"id": "slot_0",
+		"x": -13,
+		"y": 14,
+		"type": "HARDPOINT",
+		"equippedWeaponId": "homing_needle"
+	},
+	{
+		"id": "slot_1",
+		"x": 13,
+		"y": 14,
+		"type": "HARDPOINT",
+		"equippedWeaponId": "homing_needle"
+	}
+],
 "colliders": [
 	{
-		"x": -4,
-		"y": -5,
-		"radius": 16
+		"y": -1,
+		"radius": 22
 	}
-]
+],
+"outerBounds": {
+	"radius": 25
+}
 }

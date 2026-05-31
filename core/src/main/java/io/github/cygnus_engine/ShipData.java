@@ -45,14 +45,39 @@ public class ShipData {
     
     public List<Vector2> enginePositions = new ArrayList<Vector2>();
 
-    /** Overlapping hit circles in hull-local space (same as mounts). See {@link ShipColliderCircle}. */
+    /** Overlapping hit circles in hull-local space for projectile collision. */
     public List<ShipColliderCircle> colliders = new ArrayList<>();
+
+    /** Large click target in hull-local space; required and used only for mouse picking. */
+    public ShipColliderCircle outerBounds = new ShipColliderCircle();
 
     public void normalizeColliders() {
         if (colliders == null) {
             colliders = new ArrayList<>();
         }
         colliders.removeIf(c -> c == null || !(c.radius > 0f));
+    }
+
+    public void normalizeOuterBounds() {
+        if (outerBounds == null) {
+            outerBounds = new ShipColliderCircle();
+        }
+        if (outerBounds.radius > 0f) {
+            return;
+        }
+        float maxReach = 0f;
+        if (colliders != null) {
+            for (ShipColliderCircle c : colliders) {
+                if (c == null || !(c.radius > 0f)) continue;
+                float reach = (float) Math.sqrt(c.x * c.x + c.y * c.y) + c.radius;
+                maxReach = Math.max(maxReach, reach);
+            }
+        }
+        if (maxReach > 0f) {
+            outerBounds.set(0f, 0f, maxReach + 6f);
+        } else {
+            outerBounds.set(0f, 0f, 24f);
+        }
     }
 
     public void normalizeWeaponSlots() {

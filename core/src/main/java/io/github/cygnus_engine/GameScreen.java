@@ -27,6 +27,8 @@ public class GameScreen {
     private Window gameplayWindow;
     private CargoMenuScreen cargoMenuScreen;
     private GameObjectInfoWindow objectInfoWindow;
+    private float savedInfoWindowX = Float.NaN;
+    private float savedInfoWindowY = Float.NaN;
 
     public GameScreen(Stage stage, Skin skin, ScreenListener listener) {
         this.stage = stage;
@@ -84,36 +86,58 @@ public class GameScreen {
 
     private void setupInputHandling() {
         InputMultiplexer inputMultiplexer = new InputMultiplexer();
+        inputMultiplexer.addProcessor(stage);
         inputMultiplexer.addProcessor(new InputAdapter() {
             @Override
+            public boolean scrolled(float amountX, float amountY) {
+                gameWorld.adjustZoom(amountY);
+                return true;
+            }
+
+            @Override
             public boolean touchDown(int screenX, int screenY, int pointer, int button) {
-                // Convert screen coordinates (Y is inverted)
                 float clientX = Gdx.graphics.getWidth();
                 float clientY = Gdx.graphics.getHeight();
 
                 Vector3 clickedPos = new Vector3(screenX, screenY, 0);
                 Vector3 unprojected = gameWorld.getCamera().unproject(clickedPos, 0.0f, 0.0f, clientX, clientY);
 
-                // Check if we clicked on a game object
                 GameObject clickedObject = gameWorld.getObjectAt(unprojected.x, unprojected.y);
-                gameWorld.drawClickDebugIndicator(unprojected.x, unprojected.y, clickedObject);
                 if (clickedObject != null) {
+                    gameWorld.setSelectedObject(clickedObject);
                     showObjectInfo(clickedObject);
-                    return true; // Consume the event
+                    return true;
                 }
-                return false; // Let UI handle it
+
+                gameWorld.setSelectedObject(null);
+                return false;
             }
         });
-        inputMultiplexer.addProcessor(stage);
         Gdx.input.setInputProcessor(inputMultiplexer);
     }
 
+    private void rememberInfoWindowPosition() {
+        if (objectInfoWindow != null) {
+            savedInfoWindowX = objectInfoWindow.getX();
+            savedInfoWindowY = objectInfoWindow.getY();
+        }
+    }
+
     private void showObjectInfo(GameObject gameObject) {
+        rememberInfoWindowPosition();
         if (objectInfoWindow != null) {
             objectInfoWindow.remove();
+            objectInfoWindow = null;
         }
-        objectInfoWindow = new GameObjectInfoWindow(skin, gameObject, stage, cargo, moneyRef);
-        UiWindowUtils.createAndCenterWindow(objectInfoWindow, stage);
+        objectInfoWindow = new GameObjectInfoWindow(skin, gameObject, stage, cargo, moneyRef, this::rememberInfoWindowPosition);
+        objectInfoWindow.pack();
+        if (!Float.isNaN(savedInfoWindowX) && !Float.isNaN(savedInfoWindowY)) {
+            objectInfoWindow.setPosition(savedInfoWindowX, savedInfoWindowY);
+        } else {
+            UiWindowUtils.createAndCenterWindow(objectInfoWindow, stage);
+            return;
+        }
+        stage.addActor(objectInfoWindow);
     }
 
     public void update(float deltaTime) {

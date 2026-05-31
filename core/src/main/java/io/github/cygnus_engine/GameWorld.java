@@ -15,6 +15,11 @@ import com.badlogic.gdx.Gdx;
 public class GameWorld {
     private static final float WORLD_WIDTH = 800f;
     private static final float WORLD_HEIGHT = 600f;
+    private static final float DEFAULT_SHIP_RADIUS = 18f;
+    private static final float MIN_CAMERA_ZOOM = 0.35f;
+    private static final float MAX_CAMERA_ZOOM = 3.5f;
+    private static final float ZOOM_SCROLL_STEP = 0.12f;
+    private static final float SELECTION_RING_PADDING = 6f;
     
     private ShapeRenderer shapeRenderer;
     private OrthographicCamera camera;
@@ -24,12 +29,10 @@ public class GameWorld {
     private Array<SpaceShip> spaceShips;
     private float warpTimer;
     private float warpInterval;
-    private GameObject debugIndicator;
-    private GameObject clickedObject;
+    private GameObject selectedObject;
+    private float cameraZoom = 1f;
 
-    private SpriteBatch spriteBatch; // For future use with textures and fonts
-    private ShipData playerShipData;
-    private float playerShipRadius = 18f;
+    private SpriteBatch spriteBatch;
     private final Array<ShipData> shipTemplates = new Array<>();
     private ProjectileManager projectileManager;
     private final ObjectMap<String, ShipData> shipDataById = new ObjectMap<>();
@@ -52,7 +55,6 @@ public class GameWorld {
         spriteBatch = new SpriteBatch();
         spriteBatch.setProjectionMatrix(camera.combined);
         loadAllShipSprites();
-        loadPlayerShip("fighter");
         initialize();
     }
 
@@ -70,6 +72,7 @@ public class GameWorld {
                 if (!"json".equalsIgnoreCase(file.extension())) continue;
                 ShipData data = ShipDataIO.loadFromJson(file);
                 if (data == null || data.id == null || data.id.isBlank()) continue;
+                if (data.texturePath == null || data.texturePath.isBlank()) continue;
                 shipDataById.put(data.id, data);
                 shipTemplates.add(data);
                 obtainShipTexture(data);
@@ -77,32 +80,15 @@ public class GameWorld {
         }
     }
 
-    private void loadPlayerShip(String shipId) {
-        playerShipData = shipDataById.get(shipId);
-        if (playerShipData == null) {
-            FileHandle textureFile = com.badlogic.gdx.Gdx.files.local("mods/core/" + shipId + ".png");
-            playerShipData = ShipDataIO.loadOrCreateDefault(textureFile);
-            if (playerShipData != null && playerShipData.id != null && !playerShipData.id.isBlank()) {
-                shipDataById.put(playerShipData.id, playerShipData);
-                obtainShipTexture(playerShipData);
-            }
-        }
-        if (playerShipData == null && shipDataById.size > 0) {
-            playerShipData = shipDataById.values().next();
-        }
-        if (playerShipData == null) {
-            throw new IllegalStateException("No ship data available for player ship.");
-        }
-
-        Texture hullTex = obtainShipTexture(playerShipData);
-        if (hullTex != null) {
-            playerShipRadius = ShipSpriteOrientation.hullRadiusFromTexture(hullTex.getWidth(), hullTex.getHeight());
-        }
-    }
-
-    private float shipRadiusFromShipData(ShipData data, float fallbackRadius) {
+    private float shipRadiusFromShipData(ShipData data) {
         if (data == null) {
-            return fallbackRadius;
+            return DEFAULT_SHIP_RADIUS;
+        }
+        data.normalizeOuterBounds();
+        if (data.outerBounds != null && data.outerBounds.radius > 0f) {
+            float reach = (float) Math.sqrt(data.outerBounds.x * data.outerBounds.x + data.outerBounds.y * data.outerBounds.y)
+                + data.outerBounds.radius;
+            return reach;
         }
         if (data.colliders != null) {
             float maxReach = 0f;
@@ -118,7 +104,7 @@ public class GameWorld {
         if (tex != null) {
             return ShipSpriteOrientation.hullRadiusFromTexture(tex.getWidth(), tex.getHeight());
         }
-        return fallbackRadius;
+        return DEFAULT_SHIP_RADIUS;
     }
     
     private void initialize() {
@@ -130,8 +116,9 @@ public class GameWorld {
         spaceStation = new GameObject(GameObject.Type.SPACE_STATION, WORLD_WIDTH * 1.25f, WORLD_HEIGHT * 0.5f, 50f, "Space Station");
         gameObjects.add(spaceStation);
 
-        debugIndicator = new GameObject(GameObject.Type.DEBUG_INDICATOR, 0, 0, 10f, "Debug Indicator");
-        gameObjects.add(debugIndicator);
+        if (shipTemplates.isEmpty()) {
+            throw new IllegalStateException("No ship templates found under mods/. Add ship JSON files before playing.");
+        }
         
         // Create space ships
         for (int i = 0; i < 6; i++) {
@@ -140,10 +127,8 @@ public class GameWorld {
 
             GameObject orbitTarget = Math.random() > 0.5 ? planet : spaceStation;
 
-            ShipData template = shipTemplates.size > 0
-                ? shipTemplates.get(MathUtils.random(shipTemplates.size - 1))
-                : playerShipData;
-            float shipRadius = shipRadiusFromShipData(template, playerShipRadius);
+            ShipData template = shipTemplates.get(MathUtils.random(shipTemplates.size - 1));
+            float shipRadius = shipRadiusFromShipData(template);
 
             SpaceShip ship = new SpaceShip(
                 x,
@@ -261,10 +246,16 @@ public class GameWorld {
                 spaceShips.get(index).triggerWarpOut();
             }
         }
-
-        if (clickedObject != null) {
-            drawClickDebugIndicator(clickedObject.getX(), clickedObject.getY(), clickedObject);
+    }
+    
+    public void adjustZoom(float scrollAmount) {
+        if (scrollAmount == 0f) {
+            return;
         }
+        cameraZoom = MathUtils.clamp(cameraZoom + scrollAmount * ZOOM_SCROLL_STEP, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM);
+        camera.zoom = cameraZoom;
+        camera.update();
+        spriteBatch.setProjectionMatrix(camera.combined);
     }
     
     public void render() {
@@ -315,15 +306,34 @@ public class GameWorld {
 
                     // the sprites do not respect viewport size!!!
                     break;
-                case DEBUG_INDICATOR:
-                    shapeRenderer.setColor(Color.RED);
-                    shapeRenderer.circle(obj.getX(), obj.getY(), obj.getSize());
-                    break;
             }
         }
         projectileManager.render(shapeRenderer);
-        
+        drawSelectionIndicators();
+
         shapeRenderer.end();
+    }
+
+    private void drawSelectionIndicators() {
+        if (selectedObject != null) {
+            drawSelectionRing(selectedObject, Color.GREEN);
+        }
+
+        if (selectedObject instanceof SpaceShip selectedShip) {
+            GameObject combatTarget = selectedShip.getCombatTarget();
+            if (combatTarget != null && isIndicatorVisible(combatTarget)) {
+                drawSelectionRing(combatTarget, Color.RED);
+            }
+        }
+    }
+
+    private static boolean isIndicatorVisible(GameObject obj) {
+        return !(obj instanceof SpaceShip ship) || ship.isVisible();
+    }
+
+    private void drawSelectionRing(GameObject obj, Color color) {
+        shapeRenderer.setColor(color);
+        shapeRenderer.circle(obj.getX(), obj.getY(), SELECTION_RING_PADDING);
     }
     
     public void resize(int width, int height) {
@@ -344,18 +354,10 @@ public class GameWorld {
         
         // this keeps the same position on the screen, and won't jump the camera up and right like it would if we used screen width/height
         camera.position.set(WORLD_WIDTH / 2f, WORLD_HEIGHT / 2f, 0);
-        // why does this keep the position stable?
-        // well, the camera does not move. only the viewport scales up or down
-        // the stable world width/height means that the camera position is stable
-
-        // is there any correlation between the viewport size and the world coordinates?
-
-        // if the camera moves off from center, how would I know the world position clicked?
-        // I know the camera's position. I know the viewport size. I know the world size.
+        camera.zoom = cameraZoom;
 
         camera.update();
 
-        // this ensures sprites do not stretch with the viewport, and instead maintain their size relative to the world coordinates
         spriteBatch.setProjectionMatrix(camera.combined);
     }
 
@@ -392,12 +394,12 @@ public class GameWorld {
         return null;
     }
 
-    public void drawClickDebugIndicator(float x, float y, GameObject clickedObject) {
-        debugIndicator.setX(x);
-        debugIndicator.setY(y);
-        if (clickedObject != null) {
-            this.clickedObject = clickedObject;
-        }
+    public void drawClickDebugIndicator(float x, float y, GameObject clicked) {
+        setSelectedObject(clicked);
+    }
+
+    public void setSelectedObject(GameObject obj) {
+        selectedObject = obj;
     }
 
     public GameObject getPlanet() {

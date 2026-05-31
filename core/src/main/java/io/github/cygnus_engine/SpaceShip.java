@@ -74,7 +74,7 @@ public class SpaceShip extends GameObject {
     private float velocityY = 0f;
     private boolean linedUpForShot = false; // todo - use this to fire bullets when I add the projectile system
 
-    private float maxDistanceFromOrbitTarget = 100f;
+    private float maxDistanceFromOrbitTarget = 500f;
     private float detectCombatDistance = 200f;
     private float combatMinDistance = 100f;
     private float combatMaxDistance = 300f;
@@ -88,7 +88,7 @@ public class SpaceShip extends GameObject {
     private float combatMinDistanceSquared;
     private float combatMaxDistanceSquared;
     private float combatFireRangeSquared;
-    private float exitWarpWhenCloseToOrbitTargetDistanceSquared;
+    private float exitWarpWhenCloseToOrbitTargetDistanceSquared; // unused due to buggy code
     private float enterWarpWhenFarFromOrbitTargetDistanceSquared;
 
     private Cargo cargo;
@@ -100,8 +100,10 @@ public class SpaceShip extends GameObject {
     private boolean isVisible = true;
 
     private final Array<ShipWeaponInstance> weaponInstances = new Array<>();
-    /** Copy of hull {@link ShipData#colliders} for projectile and click hits. */
+    /** Copy of hull {@link ShipData#colliders} for projectile hits. */
     private final Array<ShipColliderCircle> collisionCircles = new Array<>();
+    /** Copy of hull {@link ShipData#outerBounds} for mouse picking only. */
+    private ShipColliderCircle clickBounds;
     private final Affine2 worldTransform = new Affine2();
     private final Vector2 collisionScratch = new Vector2();
     private Sprite hullSprite;
@@ -167,6 +169,7 @@ public class SpaceShip extends GameObject {
         }
         data.normalizeCombatProfile();
         data.normalizeColliders();
+        data.normalizeOuterBounds();
         combatProfile = parseCombatProfile(data.combatProfile);
 
         collisionCircles.clear();
@@ -174,6 +177,12 @@ public class SpaceShip extends GameObject {
             for (ShipColliderCircle c : data.colliders) {
                 collisionCircles.add(new ShipColliderCircle(c.x, c.y, c.radius));
             }
+        }
+
+        if (data.outerBounds != null && data.outerBounds.radius > 0f) {
+            clickBounds = data.outerBounds.copy();
+        } else {
+            clickBounds = null;
         }
 
         // todo - these should be computed at runtime, not read from the json
@@ -215,18 +224,13 @@ public class SpaceShip extends GameObject {
     public boolean containsPoint(float pointX, float pointY) {
         refreshWorldTransformAndMountCaches();
 
-        if (collisionCircles.size > 0) {
-            for (int i = 0; i < collisionCircles.size; i++) {
-                ShipColliderCircle c = collisionCircles.get(i);
-                collisionScratch.set(c.x, c.y);
-                worldTransform.applyTo(collisionScratch);
-                float dx = pointX - collisionScratch.x;
-                float dy = pointY - collisionScratch.y;
-                if (dx * dx + dy * dy <= (double) c.radius * c.radius) {
-                    return true;
-                }
-            }
-            return false;
+        if (clickBounds != null) {
+            collisionScratch.set(clickBounds.x, clickBounds.y);
+            worldTransform.applyTo(collisionScratch);
+            float dx = pointX - collisionScratch.x;
+            float dy = pointY - collisionScratch.y;
+            float r = clickBounds.radius;
+            return dx * dx + dy * dy <= (double) r * r;
         }
 
         return super.containsPoint(pointX, pointY);
@@ -244,6 +248,10 @@ public class SpaceShip extends GameObject {
 
     public CombatProfile getCombatProfile() {
         return combatProfile;
+    }
+
+    public GameObject getCombatTarget() {
+        return combatTarget;
     }
 
     public Array<ShipWeaponInstance> getWeaponInstances() {
@@ -423,7 +431,7 @@ public class SpaceShip extends GameObject {
         // note: let updatePostion handle the actual movement based on currentSpeed and rotation, we just need to set the rotation towards the direction we want to warp out in
         
         // Disappear after getting away from the planet or station
-        Boolean farFromOrbitTarget = getDistanceToSquared(orbitTarget) > enterWarpWhenFarFromOrbitTargetDistanceSquared;
+        Boolean farFromOrbitTarget = getDistanceToOrbitTargetSquared() > enterWarpWhenFarFromOrbitTargetDistanceSquared;
         if (farFromOrbitTarget && warpTimer > 2f) {
             //System.out.println("Warp out ... ship disappeared");
             isVisible = false;
@@ -465,11 +473,9 @@ public class SpaceShip extends GameObject {
         currentSpeed = MathUtils.lerp(warpSpeed, maxNormalSpeed, _warpTimer / 2f);
         
         // note: let updatePostion handle the actual movement based on currentSpeed and rotation, we just need to set the rotation towards the direction we want to warp in from
-        //adjustCourseIfNeeded();
 
-        // switch to normal flying if we are close to the planet or station
-        Boolean closeToOrbitTarget = getDistanceToSquared(orbitTarget) < exitWarpWhenCloseToOrbitTargetDistanceSquared;
-        if (closeToOrbitTarget && warpTimer > 2f) {
+        // switch to normal flying if we have slowed down
+        if (warpTimer > 2f) {
             warpTimer = 0f;
             currentBehavior = Behavior.FLYING_AROUND_TARGET;
         }
@@ -584,7 +590,7 @@ public class SpaceShip extends GameObject {
             directionChangeTimer = 0f;
             directionChangeInterval = 2f;
             // Change angle slightly (smooth turns)
-            _angle += MathUtils.random(-45f, 45f);
+            _angle += MathUtils.random(-180f, 180f);
             _angle = CustomMathUtils.normalizeAngle360(_angle);
             targetAngle = _angle;
 
@@ -598,12 +604,14 @@ public class SpaceShip extends GameObject {
 
         // todo - this needs a better way to determine if we are too far away
         
-        if (getDistanceToSquared(orbitTarget) > maxDistanceFromOrbitTargetSquared) {
+        if (getDistanceToOrbitTargetSquared() > maxDistanceFromOrbitTargetSquared) {
             // Too far, turn towards nearest object
             // set target angle directly towards the object
-            float angleToClosest = getAngleToObject(orbitTarget.getX(), orbitTarget.getY());
+            float angleToClosest = getAngleToObjectForAdjustCourse(orbitTarget.getX(), orbitTarget.getY());
             
             angleToClosest = CustomMathUtils.normalizeAngle360(angleToClosest);
+
+            //System.out.println("adjusting course for ship " + getName() + " to target angle " + String.format("%.0f", angleToClosest));
 
             targetAngle = angleToClosest;
         }
@@ -662,7 +670,14 @@ public class SpaceShip extends GameObject {
         }
     }
     
+    private float getAngleToObjectForAdjustCourse(float objectX, float objectY) {
+        // compute the angle from the ship to the target 
+        return CustomMathUtils.getAngleBetweenPoints(getX(), getY(), objectX, objectY);
+    }
+
+
     private float getAngleToObject(float objectX, float objectY) {
+        // compute the angle from the target to the ship 
         return CustomMathUtils.getAngleBetweenPoints(objectX, objectY, getX(), getY());
     }
 
@@ -713,5 +728,17 @@ public class SpaceShip extends GameObject {
 
     public boolean isLinedUpForShot() {
         return linedUpForShot;
+    }
+
+    public float getDirectionChangeTimer() {
+        return directionChangeTimer;
+    }
+
+    public float getDistanceToOrbitTargetSquared() {
+        return getDistanceToSquared(orbitTarget);
+    }
+
+    public float getTargetAngle() {
+        return targetAngle;
     }
 }
