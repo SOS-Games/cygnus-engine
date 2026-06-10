@@ -21,16 +21,10 @@ public class ShipData {
     public float cargoSpace;
 
     /**
-     * AI combat movement style: {@code FIGHTER} (dogfight + strafe dodge) or {@code FRIGATE} (orbit at
-     * {@link #orbitCombatRadius}, no dodge strafe; relies on turrets and homing weapons).
+     * AI combat movement style: {@code FIGHTER} (closer orbit, frequent dodge, hull aims at lead)
+     * or {@code FRIGATE} (wider orbit, slower dodge, tangential hull; turrets/homing fire).
      */
     public String combatProfile = "FIGHTER";
-    
-    /** Preferred standoff distance to enemy when using frigate orbit AI. */
-    public float orbitCombatRadius = 220f;
-    
-    /** Hysteresis band so the ship does not oscillate at the orbit radius. */
-    public float orbitCombatBand = 50f;
     
     /**
      * Hull yaw limit in degrees per second when this JSON is applied to an AI {@link SpaceShip}.
@@ -104,13 +98,6 @@ public class ShipData {
             combatProfile = "FIGHTER";
         } else {
             combatProfile = combatProfile.trim().toUpperCase();
-        }
-        
-        if (orbitCombatRadius <= 0f) {
-            orbitCombatRadius = 220f;
-        }
-        if (orbitCombatBand <= 0f) {
-            orbitCombatBand = 50f;
         }
     }
 }

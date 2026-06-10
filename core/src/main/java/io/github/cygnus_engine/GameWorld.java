@@ -7,6 +7,7 @@ import com.badlogic.gdx.graphics.g2d.Sprite;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.ObjectMap;
 import com.badlogic.gdx.files.FileHandle;
@@ -20,6 +21,12 @@ public class GameWorld {
     private static final float MAX_CAMERA_ZOOM = 3.5f;
     private static final float ZOOM_SCROLL_STEP = 0.12f;
     private static final float SELECTION_RING_PADDING = 6f;
+    private static final float DEFAULT_CAMERA_X = WORLD_WIDTH / 2f;
+    private static final float DEFAULT_CAMERA_Y = WORLD_HEIGHT / 2f;
+    /** Higher values snap the camera to the follow target faster. */
+    private static final float CAMERA_FOLLOW_SPEED = 5f;
+    /** Quantize rendered hull/turret angles to reduce nearest-neighbor crawl while turning. */
+    private static final float RENDER_ANGLE_SNAP_DEG = 0.5f;
     
     private ShapeRenderer shapeRenderer;
     private OrthographicCamera camera;
@@ -30,7 +37,11 @@ public class GameWorld {
     private float warpTimer;
     private float warpInterval;
     private GameObject selectedObject;
+    private SpaceShip cameraFollowTarget;
     private float cameraZoom = 1f;
+    private float worldPerPixelX = 1f;
+    private float worldPerPixelY = 1f;
+    private final Vector2 renderSnapScratch = new Vector2();
 
     private SpriteBatch spriteBatch;
     private final Array<ShipData> shipTemplates = new Array<>();
@@ -40,17 +51,18 @@ public class GameWorld {
     private final ObjectMap<String, Texture> weaponTextureCache = new ObjectMap<>();
     
     public GameWorld() {
+        GameUtils.clearSpaceShips();
         shapeRenderer = new ShapeRenderer();
         camera = new OrthographicCamera(WORLD_WIDTH, WORLD_HEIGHT);
         camera.setToOrtho(false, WORLD_WIDTH, WORLD_HEIGHT);
-        camera.position.set(WORLD_WIDTH / 2f, WORLD_HEIGHT / 2f, 0);
+        camera.position.set(DEFAULT_CAMERA_X, DEFAULT_CAMERA_Y, 0);
         camera.update();
         
         gameObjects = new Array<>();
         spaceShips = new Array<>();
         projectileManager = new ProjectileManager();
         warpTimer = 0f;
-        warpInterval = 3f; // Warp every 10 seconds on average
+        warpInterval = 10f; // Warp every 10 seconds on average
 
         spriteBatch = new SpriteBatch();
         spriteBatch.setProjectionMatrix(camera.combined);
@@ -185,7 +197,7 @@ public class GameWorld {
         }
 
         Texture texture = new Texture(resolvedTexture);
-        texture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        texture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
         shipTextureCache.put(shipData.id, texture);
         return texture;
     }
@@ -213,7 +225,7 @@ public class GameWorld {
         FileHandle fh = WeaponDataIO.resolveTextureFile(path);
         if (fh == null || !fh.exists()) return null;
         Texture tex = new Texture(fh);
-        tex.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        tex.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
         weaponTextureCache.put(path, tex);
         return tex;
     }
@@ -237,15 +249,102 @@ public class GameWorld {
         if (warpTimer >= warpInterval) {
             //System.out.println("Warp out ...");
             warpTimer = 0f;
-            warpInterval = MathUtils.random(2f, 4f);
-            
+            //warpInterval = MathUtils.random(2f, 4f);
+            /*
             // Randomly select a ship to warp out
             if (spaceShips.size > 0 && MathUtils.randomBoolean(1.0f)) {
                 System.out.println("Warp out ... selecting ship");
                 int index = MathUtils.random(spaceShips.size - 1);
                 spaceShips.get(index).triggerWarpOut();
             }
+                 */
         }
+
+        updateCamera(deltaTime);
+    }
+
+    private void updateCamera(float deltaTime) {
+        float targetX = DEFAULT_CAMERA_X;
+        float targetY = DEFAULT_CAMERA_Y;
+        boolean followShip = cameraFollowTarget != null && selectedObject == cameraFollowTarget;
+        if (followShip) {
+            targetX = cameraFollowTarget.getX();
+            targetY = cameraFollowTarget.getY();
+            camera.position.x = targetX;
+            camera.position.y = targetY;
+        } else {
+            float t = MathUtils.clamp(CAMERA_FOLLOW_SPEED * deltaTime, 0f, 1f);
+            camera.position.x = MathUtils.lerp(camera.position.x, targetX, t);
+            camera.position.y = MathUtils.lerp(camera.position.y, targetY, t);
+            snapCameraToPixelGrid();
+        }
+
+        refreshCameraProjection();
+    }
+
+    private boolean isFollowingShip() {
+        return cameraFollowTarget != null && selectedObject == cameraFollowTarget;
+    }
+
+    private void updateWorldPerPixelScales() {
+        int screenW = Gdx.graphics.getWidth();
+        int screenH = Gdx.graphics.getHeight();
+        if (screenW <= 0 || screenH <= 0) {
+            worldPerPixelX = 1f;
+            worldPerPixelY = 1f;
+            return;
+        }
+        worldPerPixelX = camera.viewportWidth * camera.zoom / screenW;
+        worldPerPixelY = camera.viewportHeight * camera.zoom / screenH;
+    }
+
+    private float snapWorldX(float worldX) {
+        if (worldPerPixelX <= 0f) {
+            return worldX;
+        }
+        return Math.round(worldX / worldPerPixelX) * worldPerPixelX;
+    }
+
+    private float snapWorldY(float worldY) {
+        if (worldPerPixelY <= 0f) {
+            return worldY;
+        }
+        return Math.round(worldY / worldPerPixelY) * worldPerPixelY;
+    }
+
+    private void snapWorldPoint(float worldX, float worldY, Vector2 out) {
+        out.x = snapWorldX(worldX);
+        out.y = snapWorldY(worldY);
+    }
+
+    private static float snapRenderAngle(float gameAngleDeg) {
+        if (RENDER_ANGLE_SNAP_DEG <= 0f) {
+            return gameAngleDeg;
+        }
+        return Math.round(gameAngleDeg / RENDER_ANGLE_SNAP_DEG) * RENDER_ANGLE_SNAP_DEG;
+    }
+
+    /** Align the camera to whole screen pixels so nearest-filtered sprites do not shimmer. */
+    private void snapCameraToPixelGrid() {
+        int screenW = Gdx.graphics.getWidth();
+        int screenH = Gdx.graphics.getHeight();
+        if (screenW <= 0 || screenH <= 0) {
+            return;
+        }
+        float worldPerPixelX = camera.viewportWidth * camera.zoom / screenW;
+        float worldPerPixelY = camera.viewportHeight * camera.zoom / screenH;
+        if (worldPerPixelX > 0f) {
+            camera.position.x = Math.round(camera.position.x / worldPerPixelX) * worldPerPixelX;
+        }
+        if (worldPerPixelY > 0f) {
+            camera.position.y = Math.round(camera.position.y / worldPerPixelY) * worldPerPixelY;
+        }
+    }
+
+    private void refreshCameraProjection() {
+        updateWorldPerPixelScales();
+        camera.update();
+        spriteBatch.setProjectionMatrix(camera.combined);
     }
     
     public void adjustZoom(float scrollAmount) {
@@ -254,21 +353,22 @@ public class GameWorld {
         }
         cameraZoom = MathUtils.clamp(cameraZoom + scrollAmount * ZOOM_SCROLL_STEP, MIN_CAMERA_ZOOM, MAX_CAMERA_ZOOM);
         camera.zoom = cameraZoom;
-        camera.update();
-        spriteBatch.setProjectionMatrix(camera.combined);
+        if (!isFollowingShip()) {
+            snapCameraToPixelGrid();
+        }
+        refreshCameraProjection();
     }
     
     public void render() {
-        // Set camera projection for consistent rendering
         shapeRenderer.setProjectionMatrix(camera.combined);
+        spriteBatch.setProjectionMatrix(camera.combined);
+
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-        
         for (GameObject obj : gameObjects) {
-            // Skip invisible ships (warped out)
             if (obj instanceof SpaceShip && !((SpaceShip) obj).isVisible()) {
                 continue;
             }
-            
+
             switch (obj.getType()) {
                 case PLANET:
                     shapeRenderer.setColor(Color.ORANGE);
@@ -277,40 +377,60 @@ public class GameWorld {
                 case SPACE_STATION:
                     shapeRenderer.setColor(Color.CYAN);
                     float halfSize = obj.getSize() / 2f;
-                    shapeRenderer.rect(obj.getX() - halfSize, obj.getY() - halfSize, 
-                                      obj.getSize(), obj.getSize());
+                    shapeRenderer.rect(obj.getX() - halfSize, obj.getY() - halfSize,
+                        obj.getSize(), obj.getSize());
                     break;
                 case SPACE_SHIP:
-                    
-                    // uncomment to see triangle clickbox
-                    //shapeRenderer.setColor(Color.GREEN);
-                    //drawRotatedTriangle(obj.getX(), obj.getY(), obj.getSize(), obj.getRotation());
-
-                    SpaceShip ship = (SpaceShip) obj;
-                    Sprite hullSprite = ship.getHullSprite();
-                    spriteBatch.begin();
-                    if (hullSprite != null) {
-                        hullSprite.setPosition(obj.getX() - hullSprite.getOriginX(), obj.getY() - hullSprite.getOriginY());
-                        hullSprite.setRotation(ShipSpriteOrientation.gameAngleToSpriteRotation(obj.getRotation()));
-                        hullSprite.draw(spriteBatch);
-                    }
-
-                    for (ShipWeaponInstance w : ship.getWeaponInstances()) {
-                        if (w.sprite == null) continue;
-
-                        w.sprite.setCenter(w.worldPosCache.x, w.worldPosCache.y);
-                        w.sprite.setRotation(ShipSpriteOrientation.gameAngleToSpriteRotation(w.aimAngleDeg));
-                        w.sprite.draw(spriteBatch);
-                    }
-                    spriteBatch.end();
-
-                    // the sprites do not respect viewport size!!!
                     break;
             }
         }
         projectileManager.render(shapeRenderer);
-        drawSelectionIndicators();
+        shapeRenderer.end();
 
+        spriteBatch.begin();
+        SpaceShip pinnedShip = isFollowingShip() ? cameraFollowTarget : null;
+        for (GameObject obj : gameObjects) {
+            if (!(obj instanceof SpaceShip ship) || !ship.isVisible()) {
+                continue;
+            }
+
+            boolean pinned = ship == pinnedShip;
+            Sprite hullSprite = ship.getHullSprite();
+            if (hullSprite != null) {
+                if (pinned) {
+                    renderSnapScratch.set(obj.getX(), obj.getY());
+                } else {
+                    snapWorldPoint(obj.getX(), obj.getY(), renderSnapScratch);
+                }
+                hullSprite.setPosition(
+                    renderSnapScratch.x - hullSprite.getOriginX(),
+                    renderSnapScratch.y - hullSprite.getOriginY()
+                );
+                hullSprite.setRotation(
+                    ShipSpriteOrientation.gameAngleToSpriteRotation(snapRenderAngle(obj.getRotation()))
+                );
+                hullSprite.draw(spriteBatch);
+            }
+
+            for (ShipWeaponInstance w : ship.getWeaponInstances()) {
+                if (w.sprite == null) continue;
+
+                if (pinned) {
+                    renderSnapScratch.set(w.worldPosCache.x, w.worldPosCache.y);
+                } else {
+                    snapWorldPoint(w.worldPosCache.x, w.worldPosCache.y, renderSnapScratch);
+                }
+                w.sprite.setCenter(renderSnapScratch.x, renderSnapScratch.y);
+                w.sprite.setRotation(
+                    ShipSpriteOrientation.gameAngleToSpriteRotation(snapRenderAngle(w.aimAngleDeg))
+                );
+                w.sprite.draw(spriteBatch);
+            }
+        }
+        spriteBatch.end();
+
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        drawSelectionIndicators();
         shapeRenderer.end();
     }
 
@@ -333,7 +453,12 @@ public class GameWorld {
 
     private void drawSelectionRing(GameObject obj, Color color) {
         shapeRenderer.setColor(color);
-        shapeRenderer.circle(obj.getX(), obj.getY(), SELECTION_RING_PADDING);
+        if (obj instanceof SpaceShip ship && ship == cameraFollowTarget && isFollowingShip()) {
+            shapeRenderer.circle(obj.getX(), obj.getY(), SELECTION_RING_PADDING);
+        } else {
+            snapWorldPoint(obj.getX(), obj.getY(), renderSnapScratch);
+            shapeRenderer.circle(renderSnapScratch.x, renderSnapScratch.y, SELECTION_RING_PADDING);
+        }
     }
     
     public void resize(int width, int height) {
@@ -352,13 +477,12 @@ public class GameWorld {
             camera.viewportHeight = width / aspectRatio;
         }
         
-        // this keeps the same position on the screen, and won't jump the camera up and right like it would if we used screen width/height
-        camera.position.set(WORLD_WIDTH / 2f, WORLD_HEIGHT / 2f, 0);
+        // Keep viewport/zoom in sync; camera position is driven by updateCamera().
         camera.zoom = cameraZoom;
-
-        camera.update();
-
-        spriteBatch.setProjectionMatrix(camera.combined);
+        if (!isFollowingShip()) {
+            snapCameraToPixelGrid();
+        }
+        refreshCameraProjection();
     }
 
     public OrthographicCamera getCamera() {
@@ -400,6 +524,7 @@ public class GameWorld {
 
     public void setSelectedObject(GameObject obj) {
         selectedObject = obj;
+        cameraFollowTarget = obj instanceof SpaceShip ship ? ship : null;
     }
 
     public GameObject getPlanet() {
@@ -411,6 +536,7 @@ public class GameWorld {
     }
     
     public void dispose() {
+        GameUtils.clearSpaceShips();
         shapeRenderer.dispose();
         spriteBatch.dispose();
         for (Texture t : shipTextureCache.values()) {

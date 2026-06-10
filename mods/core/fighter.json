@@ -5,10 +5,12 @@
 "speed": 200,
 "maneuverability": 2,
 "cargoSpace": 2,
+"hullTurnDegPerSec": 140,
 "weaponSlots": [
 	{
 		"id": "nose",
 		"y": 14,
+		"type": "HARDPOINT",
 		"equippedWeaponId": "burst_laser"
 	}
 ],

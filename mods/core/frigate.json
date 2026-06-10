@@ -2,13 +2,11 @@
 "id": "frigate",
 "name": "Patrol Frigate",
 "texturePath": "mods/core/light frigate 1.png",
-"speed": 72,
+"speed": 200,
 "maneuverability": 2,
 "cargoSpace": 8,
 "combatProfile": "FRIGATE",
-"orbitCombatRadius": 215,
-"orbitCombatBand": 48,
-"hullTurnDegPerSec": 68,
+"hullTurnDegPerSec": 100,
 "weaponSlots": [
 	{
 		"id": "top_turret",

@@ -2,9 +2,10 @@
 "id": "fighter_2",
 "name": "fighter_2",
 "texturePath": "mods/core/heavy fighter 3.png",
-"speed": 80,
+"speed": 200,
 "maneuverability": 2,
 "cargoSpace": 2,
+"hullTurnDegPerSec": 100,
 "centerOfMass": {
 	"x": 1,
 	"y": -1

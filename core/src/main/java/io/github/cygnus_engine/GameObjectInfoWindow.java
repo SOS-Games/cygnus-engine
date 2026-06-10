@@ -124,12 +124,7 @@ public class GameObjectInfoWindow extends Window {
             shipWarpTimerLabel.setText("warpTimer: " + String.format("%.2f", ship.getWarpTimer()));
             shipVisibleLabel.setText("isVisible: " + ship.isVisible());
             if (shipCombatTargetLabel != null) {
-                GameObject target = ship.getCombatTarget();
-                if (target != null) {
-                    shipCombatTargetLabel.setText("combatTarget: " + target.getName());
-                } else {
-                    shipCombatTargetLabel.setText("combatTarget: (none)");
-                }
+                shipCombatTargetLabel.setText(ship.buildCombatTargetDebugText());
             }
             directionChangeTimer.setText("directionChangeTimer: " + String.format("%.2f", ship.getDirectionChangeTimer()));
             float stringDistanceToOrbitTarget = (float) Math.sqrt(ship.getDistanceToOrbitTargetSquared());

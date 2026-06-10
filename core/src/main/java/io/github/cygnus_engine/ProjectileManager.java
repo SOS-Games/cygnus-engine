@@ -106,9 +106,11 @@ public class ProjectileManager {
             return;
         }
 
-        if (homingTarget instanceof SpaceShip ss && !ss.isVisible()) {
-            p.homingTarget = null;
-            return;
+        if (homingTarget instanceof SpaceShip ss) {
+            if (!ss.isVisible() || ss.getCurrentBehavior() == SpaceShip.Behavior.WARPED_OUT || !GameUtils.isRegisteredShip(ss)) {
+                p.homingTarget = null;
+                return;
+            }
         }
 
         float speed = p.velocity.len();

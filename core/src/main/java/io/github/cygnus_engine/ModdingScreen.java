@@ -58,9 +58,6 @@ public class ModdingScreen {
     private TextField maneuverField;
     private TextField cargoField;
     private SelectBox<String> combatProfileSelect;
-    private Table frigateOrbitFields;
-    private TextField orbitRadiusField;
-    private TextField orbitBandField;
     private TextField hullTurnField;
     private TextButton symmetryButton;
     private Label mountEditorInfoLabel;
@@ -523,31 +520,13 @@ public class ModdingScreen {
         profiles.add("FRIGATE");
         combatProfileSelect.setItems(profiles);
         combatProfileSelect.setSelected(d.combatProfile);
-        combatProfileSelect.addListener(new ChangeListener() {
-            @Override
-            public void changed(ChangeEvent event, Actor actor) {
-                refreshFrigateOrbitFieldsVisibility();
-            }
-        });
         fields.add(new Label("Profile", skin)).width(90f).row();
         fields.add(combatProfileSelect).width(140f).row();
 
-        orbitRadiusField = new TextField(Float.toString(d.orbitCombatRadius), skin);
-        orbitBandField = new TextField(Float.toString(d.orbitCombatBand), skin);
         hullTurnField = new TextField(Float.toString(d.hullTurnDegPerSec), skin);
-
-        frigateOrbitFields = new Table(skin);
-        frigateOrbitFields.defaults().pad(2f).left();
-        frigateOrbitFields.add(new Label("Orbit radius", skin)).width(90f).row();
-        frigateOrbitFields.add(orbitRadiusField).width(120f).row();
-        frigateOrbitFields.add(new Label("Orbit band", skin)).width(90f).row();
-        frigateOrbitFields.add(orbitBandField).width(120f).row();
-        fields.add(frigateOrbitFields).left().row();
 
         fields.add(new Label("Hull turn °/s", skin)).width(90f).row();
         fields.add(hullTurnField).width(120f).row();
-
-        refreshFrigateOrbitFieldsVisibility();
 
         ScrollPane fieldsScroll = new ScrollPane(fields, skin);
         fieldsScroll.setFadeScrollBars(false);
@@ -633,14 +612,6 @@ public class ModdingScreen {
             tex.dispose();
         }
         textures.clear();
-    }
-
-    private void refreshFrigateOrbitFieldsVisibility() {
-        if (frigateOrbitFields == null || combatProfileSelect == null) {
-            return;
-        }
-        boolean frigate = "FRIGATE".equals(combatProfileSelect.getSelected());
-        frigateOrbitFields.setVisible(frigate);
     }
 
     private static ArrayList<FileHandle> collectTexturePngFiles() {
@@ -976,8 +947,6 @@ public class ModdingScreen {
         if (combatProfileSelect != null) {
             d.combatProfile = combatProfileSelect.getSelected();
         }
-        d.orbitCombatRadius = parseFloatSafe(orbitRadiusField, d.orbitCombatRadius);
-        d.orbitCombatBand = parseFloatSafe(orbitBandField, d.orbitCombatBand);
         d.hullTurnDegPerSec = parseFloatSafe(hullTurnField, d.hullTurnDegPerSec);
         d.normalizeCombatProfile();
     }

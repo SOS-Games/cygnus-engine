@@ -2,10 +2,11 @@
 "id": "light frigate 1",
 "name": "light frigate 1",
 "texturePath": "mods/core/medium fighter 4.png",
-"speed": 100,
+"speed": 200,
 "maneuverability": 5,
 "cargoSpace": 5,
 "combatProfile": "FRIGATE",
+"hullTurnDegPerSec": 100,
 "centerOfMass": {
 	"x": 1,
 	"y": -2
