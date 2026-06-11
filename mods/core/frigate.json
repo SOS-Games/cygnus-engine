@@ -28,6 +28,16 @@
 		"equippedWeaponId": "homing_needle"
 	}
 ],
+"enginePositions": [
+	{
+		"x": -8,
+		"y": -12
+	},
+	{
+		"x": 8,
+		"y": -12
+	}
+],
 "colliders": [
 	{
 		"y": 12,

@@ -1,33 +1,44 @@
 # cygnus-engine
 
-A [libGDX](https://libgdx.com/) project generated with [gdx-liftoff](https://github.com/libgdx/gdx-liftoff).
+A [LibGDX](https://libgdx.com/) space sandbox: AI ships orbit planets and stations, fight with moddable hulls and weapons, and support basic trading. Includes an in-game **Modding** screen to edit ship layouts and weapon definitions.
 
-This project was generated with a template including simple application launchers and an `ApplicationAdapter` extension that draws a simple GUI on the screen.
+Built with [gdx-liftoff](https://github.com/libgdx/gdx-liftoff); desktop target uses LWJGL3.
 
-## Platforms
+## What’s in the game
 
-- `core`: Main module with the application logic shared by all platforms.
-- `lwjgl3`: Primary desktop platform using LWJGL3; was called 'desktop' in older docs.
+**Main menu**
 
-## Gradle
+- **Play** — spawns ships from mod templates; click objects for info, scroll to zoom, click a ship to follow it with the camera.
+- **Modding** — ship editor (mounts, colliders, COM, textures) and weapon editor.
+- **Exit**
 
-This project uses [Gradle](https://gradle.org/) to manage dependencies.
-The Gradle wrapper was included, so you can run Gradle tasks using `gradlew.bat` or `./gradlew` commands.
-Useful Gradle tasks and flags:
+**Play mode**
 
-- `--continue`: when using this flag, errors will not stop the tasks from running.
-- `--daemon`: thanks to this flag, Gradle daemon will be used to run chosen tasks.
-- `--offline`: when using this flag, cached dependency archives will be used.
-- `--refresh-dependencies`: this flag forces validation of all dependencies. Useful for snapshot versions.
-- `build`: builds sources and archives of every project.
-- `cleanEclipse`: removes Eclipse project data.
-- `cleanIdea`: removes IntelliJ project data.
-- `clean`: removes `build` folders, which store compiled classes and built archives.
-- `eclipse`: generates Eclipse project data.
-- `idea`: generates IntelliJ project data.
-- `lwjgl3:jar`: builds application's runnable jar, which can be found at `lwjgl3/build/libs`.
-- `lwjgl3:run`: starts the application.
-- `test`: runs unit tests (if any).
+- Ships patrol between a planet and space station, acquire combat targets, orbit, and fire projectiles (ballistic and homing).
+- Click a ship to open its debug/info window (behavior, combat target, trade).
 
-Note that most tasks that are not specific to a single project can be run with `name:` prefix, where the `name` should be replaced with the ID of a specific project.
-For example, `core:clean` removes `build` folder only from the `core` project.
+See [MODDING.md](MODDING.md) for project layout, modules, and ship/weapon JSON format.
+
+## Run
+
+```bash
+# Windows
+gradlew.bat lwjgl3:run
+
+# macOS / Linux
+./gradlew lwjgl3:run
+```
+
+Other useful tasks:
+
+| Task | Description |
+|------|-------------|
+| `compileJava` | Compile all modules |
+| `lwjgl3:jar` | Build runnable JAR (`lwjgl3/build/libs/`) |
+| `clean` | Remove build output |
+
+## Development notes
+
+- AI agent instructions: see [AGENTS.md](AGENTS.md).
+- Modding and repo layout: see [MODDING.md](MODDING.md).
+- LibGDX version and Gradle options are in `gradle.properties` and the wrapper scripts.

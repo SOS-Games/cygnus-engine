@@ -21,6 +21,7 @@ public class GameWorld {
     private static final float MAX_CAMERA_ZOOM = 3.5f;
     private static final float ZOOM_SCROLL_STEP = 0.12f;
     private static final float SELECTION_RING_PADDING = 6f;
+    private static final float ORBIT_TARGET_DEBUG_LINE_LENGTH = 100f;
     private static final float DEFAULT_CAMERA_X = WORLD_WIDTH / 2f;
     private static final float DEFAULT_CAMERA_Y = WORLD_HEIGHT / 2f;
     /** Higher values snap the camera to the follow target faster. */
@@ -46,6 +47,7 @@ public class GameWorld {
     private SpriteBatch spriteBatch;
     private final Array<ShipData> shipTemplates = new Array<>();
     private ProjectileManager projectileManager;
+    private EngineTrailRenderer engineTrailRenderer;
     private final ObjectMap<String, ShipData> shipDataById = new ObjectMap<>();
     private final ObjectMap<String, Texture> shipTextureCache = new ObjectMap<>();
     private final ObjectMap<String, Texture> weaponTextureCache = new ObjectMap<>();
@@ -61,6 +63,7 @@ public class GameWorld {
         gameObjects = new Array<>();
         spaceShips = new Array<>();
         projectileManager = new ProjectileManager();
+        engineTrailRenderer = new EngineTrailRenderer();
         warpTimer = 0f;
         warpInterval = 10f; // Warp every 10 seconds on average
 
@@ -236,6 +239,7 @@ public class GameWorld {
             ship.update(deltaTime, projectileManager);
         }
         projectileManager.update(deltaTime, spaceShips);
+        engineTrailRenderer.update(deltaTime, spaceShips);
         
         // Update other game objects
         for (GameObject obj : gameObjects) {
@@ -429,8 +433,14 @@ public class GameWorld {
         }
         spriteBatch.end();
 
+        engineTrailRenderer.render(camera);
+
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
         drawSelectionIndicators();
+        shapeRenderer.end();
+
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+        drawPinnedOrbitTargetIndicator();
         shapeRenderer.end();
     }
 
@@ -445,6 +455,34 @@ public class GameWorld {
                 drawSelectionRing(combatTarget, Color.RED);
             }
         }
+    }
+
+    /** Short line from the camera-pinned ship toward its patrol orbit target (planet/station). */
+    private void drawPinnedOrbitTargetIndicator() {
+        if (!isFollowingShip() || cameraFollowTarget == null) {
+            return;
+        }
+
+        GameObject orbitTarget = cameraFollowTarget.getOrbitTarget();
+        if (orbitTarget == null) {
+            return;
+        }
+
+        float sx = cameraFollowTarget.getX();
+        float sy = cameraFollowTarget.getY();
+        float dx = orbitTarget.getX() - sx;
+        float dy = orbitTarget.getY() - sy;
+        float distance = (float) Math.sqrt(dx * dx + dy * dy);
+        if (distance < 0.001f) {
+            return;
+        }
+
+        float lineLength = Math.min(ORBIT_TARGET_DEBUG_LINE_LENGTH, distance * 0.35f);
+        float ex = sx + (dx / distance) * lineLength;
+        float ey = sy + (dy / distance) * lineLength;
+
+        shapeRenderer.setColor(0.45f, 0.9f, 1f, 1f);
+        shapeRenderer.line(sx, sy, ex, ey);
     }
 
     private static boolean isIndicatorVisible(GameObject obj) {
@@ -547,5 +585,9 @@ public class GameWorld {
             if (t != null) t.dispose();
         }
         weaponTextureCache.clear();
+        if (engineTrailRenderer != null) {
+            engineTrailRenderer.dispose();
+            engineTrailRenderer = null;
+        }
     }
 }

@@ -85,6 +85,8 @@ public class SpaceShip extends GameObject {
     private static final float DEFAULT_WEAPON_RANGE = 260f;
     /** Forward/strafe acceleration in units/s² = fraction × reference speed (max or active target). */
     private static final float ACCELERATION_FRACTION_OF_MAX_SPEED = 0.75f;
+    /** During combat, ships may roam up to this multiple of {@link #maxDistanceFromOrbitTarget}. */
+    private static final float COMBAT_ORBIT_LEASH_MULTIPLIER = 2f;
 
     private float combatAimToleranceDegrees = 12f;
     private float velocityX = 0f;
@@ -99,6 +101,7 @@ public class SpaceShip extends GameObject {
 
     // don't manually set these squared values!
     private float maxDistanceFromOrbitTargetSquared;
+    private float maxCombatDistanceFromOrbitTargetSquared;
     private float detectCombatDistanceSquared;
     private float combatFireRangeSquared;
     private float exitWarpWhenCloseToOrbitTargetDistanceSquared; // unused due to buggy code
@@ -117,6 +120,8 @@ public class SpaceShip extends GameObject {
     private final Array<ShipColliderCircle> collisionCircles = new Array<>();
     /** Copy of hull {@link ShipData#outerBounds} for mouse picking only. */
     private ShipColliderCircle clickBounds;
+    /** Hull-local engine mount points for VFX. */
+    private final Array<Vector2> engineLocalPositions = new Array<>();
     private final Affine2 worldTransform = new Affine2();
     private final Vector2 collisionScratch = new Vector2();
     private Sprite hullSprite;
@@ -141,6 +146,8 @@ public class SpaceShip extends GameObject {
         this.cargo = new Cargo(true);
 
         maxDistanceFromOrbitTargetSquared = (float) Math.pow(maxDistanceFromOrbitTarget, 2);
+        maxCombatDistanceFromOrbitTargetSquared = maxDistanceFromOrbitTargetSquared
+            * (float) Math.pow(COMBAT_ORBIT_LEASH_MULTIPLIER, 2);
         detectCombatDistanceSquared = (float) Math.pow(detectCombatDistance, 2);
         combatFireRangeSquared = (float) Math.pow(combatFireRange, 2);
         exitWarpWhenCloseToOrbitTargetDistanceSquared = (float) Math.pow(exitWarpWhenCloseToOrbitTargetDistance, 2);
@@ -203,6 +210,18 @@ public class SpaceShip extends GameObject {
         if (data.hullTurnDegPerSec > 0f) {
             maneuverability = data.hullTurnDegPerSec;
         }
+
+        engineLocalPositions.clear();
+        if (data.enginePositions != null && !data.enginePositions.isEmpty()) {
+            for (Vector2 engine : data.enginePositions) {
+                if (engine == null) continue;
+                engineLocalPositions.add(new Vector2(engine.x, engine.y));
+            }
+        }
+        if (engineLocalPositions.isEmpty()) {
+            engineLocalPositions.add(new Vector2(0f, -10f));
+        }
+
         recomputeCombatRangesFromWeapons();
     }
 
@@ -303,6 +322,10 @@ public class SpaceShip extends GameObject {
 
     public GameObject getCombatTarget() {
         return combatTarget;
+    }
+
+    public GameObject getOrbitTarget() {
+        return orbitTarget;
     }
 
     public Array<ShipWeaponInstance> getWeaponInstances() {
@@ -446,6 +469,59 @@ public class SpaceShip extends GameObject {
     public void writeMountWorldPosition(WeaponSlot slot, Vector2 out) {
         out.set(slot.x, slot.y);
         worldTransform.applyTo(out);
+    }
+
+    public int getEngineCount() {
+        return engineLocalPositions.size;
+    }
+
+    public void writeEngineWorldPosition(int index, Vector2 out) {
+        Vector2 local = engineLocalPositions.get(index);
+        out.set(local.x, local.y);
+        worldTransform.applyTo(out);
+    }
+
+    /** Plume direction: opposite world motion when moving, else hull aft (+Y nose → -Y local). */
+    public void writeEngineExhaustDirection(int engineIndex, Vector2 out) {
+        float speed = getWorldSpeed();
+        if (speed > 2f) {
+            out.set(-velocityX / speed, -velocityY / speed);
+            return;
+        }
+
+        out.set(0f, -1f);
+        out.rotate(ShipSpriteOrientation.gameAngleToLocalTransformRotation(getRotation()));
+        if (out.len2() > 0.0001f) {
+            out.nor();
+        }
+    }
+
+    public boolean isEngineTrailActive() {
+        if (!isVisible || currentBehavior == Behavior.WARPED_OUT) {
+            return false;
+        }
+        if (currentBehavior == Behavior.WARPING_OUT || currentBehavior == Behavior.WARPING_IN) {
+            return true;
+        }
+        return getWorldSpeed() > 2f;
+    }
+
+    public float getEngineTrailIntensity() {
+        float speedFactor = MathUtils.clamp(getWorldSpeed() / Math.max(maxNormalSpeed, 1f), 0f, 1.25f);
+        if (currentBehavior == Behavior.WARPING_OUT || currentBehavior == Behavior.WARPING_IN) {
+            speedFactor = Math.max(speedFactor, 1f);
+        } else if (isEngineTrailActive()) {
+            speedFactor = Math.max(speedFactor, 0.45f);
+        }
+        return speedFactor;
+    }
+
+    public float getWorldSpeed() {
+        return (float) Math.sqrt(velocityX * velocityX + velocityY * velocityY);
+    }
+
+    public float getCurrentSpeed() {
+        return currentSpeed;
     }
 
     public Affine2 getWorldTransform() {
@@ -630,6 +706,7 @@ public class SpaceShip extends GameObject {
 
         targetForwardSpeed = orbitForward;
         applyRandomDodgeStrafe(deltaTime, orbitStrafe);
+        applyCombatOrbitLeash();
 
         if (keepNoseOnTarget) {
             float angleDiff = Math.abs(CustomMathUtils.angleDifference(targetAngle, getRotation()));
@@ -684,6 +761,28 @@ public class SpaceShip extends GameObject {
             dodgeTimer = MathUtils.random(minInterval, maxInterval);
         }
         targetStrafeSpeed = orbitStrafe + dodgeStrafeSpeed;
+    }
+
+    /** Pull ships back toward their patrol anchor if combat drift exceeds 2× the normal orbit leash. */
+    private void applyCombatOrbitLeash() {
+        if (orbitTarget == null) {
+            return;
+        }
+
+        float distSq = getDistanceToOrbitTargetSquared();
+        if (distSq <= maxCombatDistanceFromOrbitTargetSquared) {
+            return;
+        }
+
+        float dist = (float) Math.sqrt(distSq);
+        float maxDist = maxDistanceFromOrbitTarget * COMBAT_ORBIT_LEASH_MULTIPLIER;
+        float overshootFraction = Math.max(0f, (dist - maxDist) / maxDist);
+
+        targetAngle = CustomMathUtils.normalizeAngle360(
+            getAngleToTarget(orbitTarget.getX(), orbitTarget.getY())
+        );
+        targetForwardSpeed = maxNormalSpeed * MathUtils.clamp(0.55f + overshootFraction * 0.35f, 0.55f, 0.95f);
+        targetStrafeSpeed *= 0.2f;
     }
 
     private void accelerateTowardTargets(float deltaTime) {
@@ -864,13 +963,29 @@ public class SpaceShip extends GameObject {
 
     /** Multi-line debug snapshot of the current combat target for the info window. */
     public String buildCombatTargetDebugText() {
+        GameObject seekPick = getClosestShipWithinRange(detectCombatDistanceSquared);
+        StringBuilder sb = new StringBuilder();
+
         if (combatTarget == null) {
-            return "combatTarget: (none)";
+            sb.append("combatTarget: (none)\n");
+            sb.append("  id@-\n");
+            sb.append("  type: -\n");
+            sb.append("  pos: (-, -)\n");
+            sb.append("  distance: - / detect ").append(String.format("%.0f", detectCombatDistance)).append('\n');
+            sb.append("  visible: -\n");
+            sb.append("  behavior: -\n");
+            sb.append("  warpTimer: -\n");
+            sb.append("  red ring: -\n");
+            sb.append("  seek picks: ")
+                .append(seekPick == null ? "(none)" : seekPick.getName())
+                .append(seekPick == null ? "" : " id@" + System.identityHashCode(seekPick))
+                .append('\n');
+            sb.append("  ship registry: ").append(GameUtils.getRegisteredShipCount()).append(" active\n");
+            sb.append("  target status: -\n");
+            return sb.toString();
         }
 
         float dist = (float) Math.sqrt(getDistanceToSquared(combatTarget));
-        GameObject seekPick = getClosestShipWithinRange(detectCombatDistanceSquared);
-        StringBuilder sb = new StringBuilder();
         sb.append("combatTarget: ").append(combatTarget.getName()).append('\n');
         sb.append("  id@").append(System.identityHashCode(combatTarget)).append('\n');
         sb.append("  type: ").append(combatTarget.getType()).append('\n');
@@ -889,7 +1004,12 @@ public class SpaceShip extends GameObject {
             sb.append("  visible: ").append(targetShip.isVisible()).append('\n');
             sb.append("  behavior: ").append(targetShip.getCurrentBehavior()).append('\n');
             sb.append("  warpTimer: ").append(String.format("%.2f", targetShip.getWarpTimer())).append('\n');
-            sb.append("  red ring: ").append(targetShip.isVisible() ? "yes" : "hidden (invisible)").append('\n');
+            sb.append("  red ring: ").append(targetShip.isVisible() ? "yes" : "hidden").append('\n');
+        } else {
+            sb.append("  visible: n/a\n");
+            sb.append("  behavior: n/a\n");
+            sb.append("  warpTimer: n/a\n");
+            sb.append("  red ring: n/a\n");
         }
 
         sb.append("  seek picks: ")
@@ -897,17 +1017,32 @@ public class SpaceShip extends GameObject {
             .append(seekPick == null ? "" : " id@" + System.identityHashCode(seekPick))
             .append('\n');
         sb.append("  ship registry: ").append(GameUtils.getRegisteredShipCount()).append(" active\n");
-
-        if (combatTarget instanceof SpaceShip targetShip && !GameUtils.isRegisteredShip(targetShip)) {
-            sb.append("  PHANTOM? not in active ship registry\n");
-        }
-        if (combatTarget != seekPick) {
-            sb.append("  STALE? combatTarget != seek pick\n");
-        }
-        if (combatTarget instanceof SpaceShip targetShip && !targetShip.isVisible()) {
-            sb.append("  STALE? firing at invisible ship\n");
-        }
+        sb.append("  target status: ").append(formatCombatTargetStatus(seekPick)).append('\n');
 
         return sb.toString();
+    }
+
+    private String formatCombatTargetStatus(GameObject seekPick) {
+        if (combatTarget == null) {
+            return "-";
+        }
+
+        StringBuilder status = new StringBuilder();
+        if (combatTarget instanceof SpaceShip targetShip && !GameUtils.isRegisteredShip(targetShip)) {
+            status.append("phantom");
+        }
+        if (combatTarget != seekPick) {
+            if (status.length() > 0) {
+                status.append(", ");
+            }
+            status.append("stale seek");
+        }
+        if (combatTarget instanceof SpaceShip targetShip && !targetShip.isVisible()) {
+            if (status.length() > 0) {
+                status.append(", ");
+            }
+            status.append("invisible");
+        }
+        return status.length() == 0 ? "ok" : status.toString();
     }
 }

@@ -10,18 +10,19 @@ import com.badlogic.gdx.scenes.scene2d.ui.Window;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 
 public class GameObjectInfoWindow extends Window {
+    private static final float COMBAT_DEBUG_LABEL_WIDTH = 320f;
+
     private final GameObject gameObject;
     private final Runnable onClose;
-    private final Label positionLabel;
-    private final Label sizeLabel;
-    private final Label rotationLabel;
     private final Label shipBehaviorLabel;
     private final Label shipWarpTimerLabel;
     private final Label shipVisibleLabel;
     private final Label shipCombatTargetLabel;
-    private final Label directionChangeTimer;
-    private final Label distanceToOrbitTarget;
-    private final Label targetAngle;
+
+    private String lastBehaviorText = "";
+    private String lastWarpTimerText = "";
+    private String lastVisibleText = "";
+    private String lastCombatDebugText = "";
 
     public GameObjectInfoWindow(Skin skin, GameObject gameObject, Stage stage, Cargo playerCargo, int[] moneyRef,
                                 Runnable onClose) {
@@ -37,12 +38,6 @@ public class GameObjectInfoWindow extends Window {
 
         add(new Label("Name: " + gameObject.getName(), skin)).row();
         add(new Label("Type: " + gameObject.getType().toString(), skin)).row();
-        positionLabel = new Label("", skin);
-        add(positionLabel).row();
-        sizeLabel = new Label("", skin);
-        add(sizeLabel).row();
-        rotationLabel = new Label("", skin);
-        add(rotationLabel).row();
 
         if (gameObject.getType() == GameObject.Type.SPACE_SHIP) {
             shipBehaviorLabel = new Label("", skin);
@@ -51,14 +46,10 @@ public class GameObjectInfoWindow extends Window {
             add(shipWarpTimerLabel).row();
             shipVisibleLabel = new Label("", skin);
             add(shipVisibleLabel).row();
+
             shipCombatTargetLabel = new Label("", skin);
-            add(shipCombatTargetLabel).row();
-            directionChangeTimer = new Label("", skin);
-            add(directionChangeTimer).row();
-            distanceToOrbitTarget = new Label("", skin);
-            add(distanceToOrbitTarget).row();
-            targetAngle = new Label("", skin);
-            add(targetAngle).row();
+            shipCombatTargetLabel.setWrap(true);
+            add(shipCombatTargetLabel).width(COMBAT_DEBUG_LABEL_WIDTH).row();
 
             TextButton tradeButton = new TextButton("Trade", skin);
             tradeButton.padRight(8f).padLeft(8f);
@@ -81,9 +72,6 @@ public class GameObjectInfoWindow extends Window {
             shipWarpTimerLabel = null;
             shipVisibleLabel = null;
             shipCombatTargetLabel = null;
-            directionChangeTimer = null;
-            distanceToOrbitTarget = null;
-            targetAngle = null;
         }
 
         TextButton closeButton = new TextButton("Close", skin);
@@ -99,8 +87,8 @@ public class GameObjectInfoWindow extends Window {
         });
         add(closeButton).padTop(8f);
 
-        pack();
         refreshDynamicLabels();
+        pack();
     }
 
     @Override
@@ -112,25 +100,29 @@ public class GameObjectInfoWindow extends Window {
     }
 
     private void refreshDynamicLabels() {
-        /*
-        positionLabel.setText("Position: (" + String.format("%.1f", gameObject.getX()) + ", "
-            + String.format("%.1f", gameObject.getY()) + ")");
-        sizeLabel.setText("Size: " + String.format("%.1f", gameObject.getSize()));
-        rotationLabel.setText("Rotation: " + String.format("%.1f", gameObject.getRotation()) + "°");
-        */
-        if (shipBehaviorLabel != null && gameObject instanceof SpaceShip) {
-            SpaceShip ship = (SpaceShip) gameObject;
-            shipBehaviorLabel.setText("currentBehavior: " + ship.getCurrentBehavior());
-            shipWarpTimerLabel.setText("warpTimer: " + String.format("%.2f", ship.getWarpTimer()));
-            shipVisibleLabel.setText("isVisible: " + ship.isVisible());
-            if (shipCombatTargetLabel != null) {
-                shipCombatTargetLabel.setText(ship.buildCombatTargetDebugText());
-            }
-            directionChangeTimer.setText("directionChangeTimer: " + String.format("%.2f", ship.getDirectionChangeTimer()));
-            float stringDistanceToOrbitTarget = (float) Math.sqrt(ship.getDistanceToOrbitTargetSquared());
-            distanceToOrbitTarget.setText("distanceToOrbitTarget: " + String.format("%.0f", stringDistanceToOrbitTarget));
-
-            targetAngle.setText("targetAngle: " + String.format("%.0f", ship.getTargetAngle()));
+        if (shipBehaviorLabel == null || !(gameObject instanceof SpaceShip ship)) {
+            return;
         }
+
+        setIfChanged(shipBehaviorLabel, lastBehaviorText, text -> lastBehaviorText = text,
+            "currentBehavior: " + ship.getCurrentBehavior());
+        setIfChanged(shipWarpTimerLabel, lastWarpTimerText, text -> lastWarpTimerText = text,
+            "warpTimer: " + String.format("%.2f", ship.getWarpTimer()));
+        setIfChanged(shipVisibleLabel, lastVisibleText, text -> lastVisibleText = text,
+            "isVisible: " + ship.isVisible());
+        setIfChanged(shipCombatTargetLabel, lastCombatDebugText, text -> lastCombatDebugText = text,
+            ship.buildCombatTargetDebugText());
+    }
+
+    private interface TextConsumer {
+        void accept(String text);
+    }
+
+    private static void setIfChanged(Label label, String lastText, TextConsumer cache, String nextText) {
+        if (nextText.equals(lastText)) {
+            return;
+        }
+        cache.accept(nextText);
+        label.setText(nextText);
     }
 }

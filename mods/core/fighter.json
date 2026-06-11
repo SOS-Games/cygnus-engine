@@ -14,6 +14,16 @@
 		"equippedWeaponId": "burst_laser"
 	}
 ],
+"enginePositions": [
+	{
+		"x": -10,
+		"y": -8
+	},
+	{
+		"x": 10,
+		"y": -8
+	}
+],
 "colliders": [
 	{
 		"y": 14,
@@ -22,10 +32,6 @@
 	{
 		"y": -4,
 		"radius": 12
-	},
-	{
-		"y": -15,
-		"radius": 6
 	}
 ],
 "outerBounds": {

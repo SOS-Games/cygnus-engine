@@ -26,8 +26,8 @@ public class ShipEditor {
     private static final float HANDLE_RADIUS = 2f;
     private static final float GRID_SIZE = 1f;
     private static final float ZOOM_SPEED = 0.1f;
-    private static final float MIN_ZOOM = 0.2f;
-    private static final float MAX_ZOOM = 3.0f;
+    private static final float MIN_ZOOM = 0.1f;
+    private static final float MAX_ZOOM = 2.0f;
 
     private float insetLeft;
     private float insetTop;
@@ -73,6 +73,7 @@ public class ShipEditor {
     private final Map<ShipColliderCircle, ShipColliderCircle> colliderMirrorPairs = new IdentityHashMap<>();
 
     private final Map<WeaponSlot, WeaponSlot> weaponMirrorPairs = new IdentityHashMap<>();
+    private final Map<Vector2, Vector2> engineMirrorPairs = new IdentityHashMap<>();
     private WeaponSlot selectedWeaponSlot;
     private final ObjectMap<String, Sprite> weaponPreviewSprites = new ObjectMap<>();
 
@@ -234,12 +235,8 @@ public class ShipEditor {
 
             if (selectedPoint != null) {
                 selectedPoint.set(mouseRel);
-                if (symmetryEnabled && selectedPointOwner != PointOwner.COM) {
-                    List<Vector2> ownerList = switch (selectedPointOwner) {
-                        case ENGINE -> shipData.enginePositions;
-                        default -> null;
-                    };
-                    Vector2 mirror = findMirrorPoint(ownerList, selectedPoint);
+                if (symmetryEnabled && selectedPointOwner == PointOwner.ENGINE) {
+                    Vector2 mirror = engineMirrorPairs.get(selectedPoint);
                     if (mirror != null) {
                         mirror.set(-selectedPoint.x, selectedPoint.y);
                     }
@@ -385,7 +382,13 @@ public class ShipEditor {
             }
             case ENGINE: {
                 if (selectedPoint == null) return false;
+                Vector2 mirror = engineMirrorPairs.remove(selectedPoint);
+                if (mirror != null) {
+                    engineMirrorPairs.remove(mirror);
+                    shipData.enginePositions.remove(mirror);
+                }
                 shipData.enginePositions.remove(selectedPoint);
+                rebuildEngineMirrorPairs();
                 break;
             }
             case COLLIDER: {
@@ -544,6 +547,7 @@ public class ShipEditor {
         ensureDefaultOuterBounds();
         rebuildColliderMirrorPairs();
         rebuildWeaponMirrorPairs();
+        rebuildEngineMirrorPairs();
         Gdx.app.log("ShipEditor", "Loaded ship JSON: " + jsonFile.path());
     }
 
@@ -656,7 +660,14 @@ public class ShipEditor {
 
     public void addEnginePosition() {
         if (shipData == null) return;
-        addPointWithOptionalMirror(shipData.enginePositions, new Vector2(0, 0));
+        Vector2 primary = new Vector2(0f, 0f);
+        shipData.enginePositions.add(primary);
+        if (symmetryEnabled) {
+            Vector2 mirror = new Vector2(0f, 0f);
+            shipData.enginePositions.add(mirror);
+            engineMirrorPairs.put(primary, mirror);
+            engineMirrorPairs.put(mirror, primary);
+        }
     }
 
     public void addColliderCircle() {
@@ -731,12 +742,6 @@ public class ShipEditor {
         return best;
     }
 
-    private void addPointWithOptionalMirror(List<Vector2> points, Vector2 point) {
-        points.add(point);
-        if (!symmetryEnabled || MathUtils.isEqual(point.x, 0f, 0.001f)) return;
-        points.add(new Vector2(-point.x, point.y));
-    }
-
     private void ensureCollidersNonNull() {
         if (shipData.colliders == null) shipData.colliders = new java.util.ArrayList<>();
     }
@@ -787,15 +792,22 @@ public class ShipEditor {
         }
     }
 
-    private Vector2 findMirrorPoint(List<Vector2> points, Vector2 original) {
-        if (points == null || original == null) return null;
-        for (Vector2 p : points) {
-            if (p == original) continue;
-            if (MathUtils.isEqual(p.x, -original.x, 0.75f) && MathUtils.isEqual(p.y, original.y, 0.75f)) {
-                return p;
+    private void rebuildEngineMirrorPairs() {
+        engineMirrorPairs.clear();
+        if (shipData == null) return;
+        List<Vector2> engines = shipData.enginePositions;
+        for (int i = 0; i < engines.size(); i++) {
+            Vector2 a = engines.get(i);
+            if (engineMirrorPairs.containsKey(a)) continue;
+            for (int j = i + 1; j < engines.size(); j++) {
+                Vector2 b = engines.get(j);
+                if (MathUtils.isEqual(a.x, -b.x, 0.75f) && MathUtils.isEqual(a.y, b.y, 0.75f)) {
+                    engineMirrorPairs.put(a, b);
+                    engineMirrorPairs.put(b, a);
+                    break;
+                }
             }
         }
-        return null;
     }
 
     private void updateHoverState(int screenX, int screenY) {
@@ -865,7 +877,13 @@ public class ShipEditor {
     private void drawOverlays() {
         shapeRenderer.setProjectionMatrix(camera.combined);
 
-        float circleRadius = 4f * camera.zoom;
+        float baseMarkerSize = 8f * camera.zoom;
+
+        if (symmetryEnabled) {
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+            drawSymmetryAxisLine();
+            shapeRenderer.end();
+        }
 
         if (layerClickBounds && shipData.outerBounds != null) {
             ShipColliderCircle ob = shipData.outerBounds;
@@ -880,36 +898,37 @@ public class ShipEditor {
 
             shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
             shapeRenderer.setColor(Color.GREEN);
-            float pr = selected ? circleRadius * 1.8f : (hoveredCenter ? circleRadius * 1.4f : circleRadius);
+            float pr = markerScale(baseMarkerSize, selected, hoveredCenter);
             shapeRenderer.circle(shipCenterWorld.x + ob.x, shipCenterWorld.y + ob.y, pr);
             shapeRenderer.end();
         }
 
         if (layerColliders) {
             shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
-            shapeRenderer.setColor(Color.CYAN);
             for (ShipColliderCircle c : shipData.colliders) {
-                boolean hl = hoveredColliderCircle == c
-                    || hoveredColliderPick != ColliderPick.NONE && hoveredColliderCircle == c;
+                boolean hl = hoveredColliderCircle == c && hoveredColliderPick != ColliderPick.NONE;
                 shapeRenderer.setColor(hl ? Color.WHITE : Color.CYAN);
                 shapeRenderer.circle(shipCenterWorld.x + c.x, shipCenterWorld.y + c.y, c.radius);
             }
             shapeRenderer.end();
 
-            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-            shapeRenderer.setColor(Color.CYAN);
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
             for (ShipColliderCircle c : shipData.colliders) {
                 boolean selected = selectionKind == SelectionKind.COLLIDER && c == selectedCollider;
                 boolean hoveredCenter = hoveredColliderPick == ColliderPick.CENTER && hoveredColliderCircle == c;
-                float pr = selected ? circleRadius * 1.8f : (hoveredCenter ? circleRadius * 1.4f : circleRadius);
-                shapeRenderer.circle(shipCenterWorld.x + c.x, shipCenterWorld.y + c.y, pr);
+                shapeRenderer.setColor(selected ? Color.WHITE : (hoveredCenter ? Color.YELLOW : Color.CYAN));
+                float s = markerScale(baseMarkerSize, selected, hoveredCenter);
+                drawCircleInCircleMarker(
+                    shipCenterWorld.x + c.x,
+                    shipCenterWorld.y + c.y,
+                    s
+                );
             }
             shapeRenderer.end();
         }
 
-        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-
         if (layerWeapons) {
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
             for (WeaponSlot slot : shipData.weaponSlots) {
                 boolean selected = selectionKind == SelectionKind.WEAPON && slot == selectedWeaponSlot;
                 boolean hovered = slot == hoveredWeaponSlot;
@@ -918,18 +937,33 @@ public class ShipEditor {
                 } else {
                     shapeRenderer.setColor(selected ? Color.WHITE : (hovered ? Color.YELLOW : Color.RED));
                 }
-                float r = selected ? circleRadius * 1.8f : (hovered ? circleRadius * 1.4f : circleRadius);
-                shapeRenderer.circle(shipCenterWorld.x + slot.x, shipCenterWorld.y + slot.y, r);
+                float s = markerScale(baseMarkerSize, selected, hovered);
+                drawWeaponSlotMarker(
+                    shipCenterWorld.x + slot.x,
+                    shipCenterWorld.y + slot.y,
+                    slot.x,
+                    slot.y,
+                    s
+                );
             }
+            shapeRenderer.end();
         }
+
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
 
         if (layerEngines) {
             for (Vector2 pos : shipData.enginePositions) {
                 boolean selected = selectionKind == SelectionKind.ENGINE && pos == selectedPoint;
                 boolean hovered = pos == hoveredPoint;
                 shapeRenderer.setColor(selected ? Color.WHITE : (hovered ? Color.YELLOW : Color.ORANGE));
-                float r = selected ? circleRadius * 1.8f : (hovered ? circleRadius * 1.4f : circleRadius);
-                shapeRenderer.circle(shipCenterWorld.x + pos.x, shipCenterWorld.y + pos.y, r);
+                float s = markerScale(baseMarkerSize, selected, hovered);
+                drawEngineMarker(
+                    shipCenterWorld.x + pos.x,
+                    shipCenterWorld.y + pos.y,
+                    pos.x,
+                    pos.y,
+                    s
+                );
             }
         }
 
@@ -937,32 +971,117 @@ public class ShipEditor {
             boolean selected = selectionKind == SelectionKind.COM;
             boolean hovered = shipData.centerOfMass == hoveredPoint;
             shapeRenderer.setColor(selected ? Color.WHITE : (hovered ? Color.YELLOW : Color.BLUE));
-            float r = selected ? circleRadius * 1.8f : (hovered ? circleRadius * 1.4f : circleRadius);
-            shapeRenderer.circle(shipCenterWorld.x + shipData.centerOfMass.x, shipCenterWorld.y + shipData.centerOfMass.y, r);
+            float s = markerScale(baseMarkerSize, selected, hovered);
+            drawComMarker(
+                shipCenterWorld.x + shipData.centerOfMass.x,
+                shipCenterWorld.y + shipData.centerOfMass.y,
+                s
+            );
         }
 
-        if (layerColliders) {
-            for (ShipColliderCircle c : shipData.colliders) {
-                boolean selected = selectionKind == SelectionKind.COLLIDER && c == selectedCollider;
-                if (selected) {
-                    shapeRenderer.setColor(Color.WHITE);
-                    shapeRenderer.circle(shipCenterWorld.x + c.x, shipCenterWorld.y + c.y, circleRadius * 1.5f);
-                }
-            }
-        }
+        shapeRenderer.end();
 
-        // Collider edge hover handle (when not selected)
         if (hoveredColliderCircle != null && layerColliders && hoveredColliderPick == ColliderPick.EDGE
             && !(selectionKind == SelectionKind.COLLIDER && hoveredColliderCircle == selectedCollider)) {
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
             shapeRenderer.setColor(Color.YELLOW);
             tmp2.set(hoveredMouseRel.x - hoveredColliderCircle.x, hoveredMouseRel.y - hoveredColliderCircle.y);
             float angle = tmp2.angleDeg();
             float rx = hoveredColliderCircle.x + MathUtils.cosDeg(angle) * hoveredColliderCircle.radius;
             float ry = hoveredColliderCircle.y + MathUtils.sinDeg(angle) * hoveredColliderCircle.radius;
-            shapeRenderer.circle(shipCenterWorld.x + rx, shipCenterWorld.y + ry, circleRadius * 1.2f);
+            shapeRenderer.circle(
+                shipCenterWorld.x + rx,
+                shipCenterWorld.y + ry,
+                baseMarkerSize * 1.2f
+            );
+            shapeRenderer.end();
+        }
+    }
+
+    private static float markerScale(float base, boolean selected, boolean hovered) {
+        if (selected) {
+            return base * 1.8f;
+        }
+        if (hovered) {
+            return base * 1.4f;
+        }
+        return base;
+    }
+
+    /** Dotted vertical line at ship-local x=0 (mirror plane for symmetry). */
+    private void drawSymmetryAxisLine() {
+        float axisX = shipCenterWorld.x;
+        float halfSpan = shipTexture.getHeight() * 0.5f + 12f * camera.zoom;
+        if (shipData != null && shipData.outerBounds != null && shipData.outerBounds.radius > 0f) {
+            halfSpan = Math.max(halfSpan, shipData.outerBounds.radius + 8f * camera.zoom);
         }
 
-        shapeRenderer.end();
+        float yMin = shipCenterWorld.y - halfSpan;
+        float yMax = shipCenterWorld.y + halfSpan;
+        float dashLen = 5f * camera.zoom;
+        float gapLen = 4f * camera.zoom;
+
+        shapeRenderer.setColor(1f, 1f, 1f, 0.4f);
+        for (float y = yMin; y < yMax; y += dashLen + gapLen) {
+            shapeRenderer.line(axisX, y, axisX, Math.min(y + dashLen, yMax));
+        }
+    }
+
+    /** Outward from ship origin through a mount; default aft (-Y) at the origin. */
+    private float outwardAngleDeg(float relX, float relY) {
+        if (MathUtils.isEqual(relX, 0f, 0.01f) && MathUtils.isEqual(relY, 0f, 0.01f)) {
+            return 270f;
+        }
+        return tmp2.set(relX, relY).angleDeg();
+    }
+
+    private void drawComMarker(float wx, float wy, float size) {
+        float spread = size * 0.62f;
+        float dotRadius = size * 0.36f;
+        for (int i = 0; i < 3; i++) {
+            float angle = 90f + i * 120f;
+            shapeRenderer.circle(
+                wx + MathUtils.cosDeg(angle) * spread,
+                wy + MathUtils.sinDeg(angle) * spread,
+                dotRadius
+            );
+        }
+    }
+
+    private void drawCircleInCircleMarker(float wx, float wy, float outerRadius) {
+        shapeRenderer.circle(wx, wy, outerRadius);
+        shapeRenderer.circle(wx, wy, outerRadius * 0.42f);
+    }
+
+    private void drawEngineMarker(float wx, float wy, float relX, float relY, float size) {
+        float angle = outwardAngleDeg(relX, relY);
+        float tipDist = size * 0.85f;
+        float baseDist = size * 0.35f;
+        float halfWidth = size * 0.48f;
+        float tipX = wx + MathUtils.cosDeg(angle) * tipDist;
+        float tipY = wy + MathUtils.sinDeg(angle) * tipDist;
+        float baseCx = wx - MathUtils.cosDeg(angle) * baseDist;
+        float baseCy = wy - MathUtils.sinDeg(angle) * baseDist;
+        float perp = angle + 90f;
+        float b1x = baseCx + MathUtils.cosDeg(perp) * halfWidth;
+        float b1y = baseCy + MathUtils.sinDeg(perp) * halfWidth;
+        float b2x = baseCx - MathUtils.cosDeg(perp) * halfWidth;
+        float b2y = baseCy - MathUtils.sinDeg(perp) * halfWidth;
+        shapeRenderer.triangle(tipX, tipY, b1x, b1y, b2x, b2y);
+    }
+
+    private void drawWeaponSlotMarker(float wx, float wy, float relX, float relY, float size) {
+        float halfW = size * 0.5f;
+        float halfH = size * 0.32f;
+        shapeRenderer.rect(wx - halfW, wy - halfH, halfW * 2f, halfH * 2f);
+        float angle = outwardAngleDeg(relX, relY);
+        float lineLen = size * 1.35f;
+        shapeRenderer.line(
+            wx,
+            wy,
+            wx + MathUtils.cosDeg(angle) * lineLen,
+            wy + MathUtils.sinDeg(angle) * lineLen
+        );
     }
 
     private void rebuildWeaponMirrorPairs() {
