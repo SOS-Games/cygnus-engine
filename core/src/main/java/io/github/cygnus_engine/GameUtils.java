@@ -21,7 +21,22 @@ public class GameUtils {
         return spaceShips.size;
     }
 
-    public static GameObject getClosestShipWithinRange(float rangeSquared, float currentX, float currentY, GameObject excludeShip) {
+    public static GameObject getClosestShipWithinRange(
+        float rangeSquared,
+        float currentX,
+        float currentY,
+        GameObject excludeShip
+    ) {
+        return getClosestShipWithinRange(rangeSquared, currentX, currentY, excludeShip, null);
+    }
+
+    public static GameObject getClosestShipWithinRange(
+        float rangeSquared,
+        float currentX,
+        float currentY,
+        GameObject excludeShip,
+        ShipFilter filter
+    ) {
         GameObject closestShip = null;
         float closestDistanceSquared = rangeSquared;
 
@@ -33,6 +48,9 @@ public class GameUtils {
                 continue;
             }
             if (!spaceShip.isVisible() || spaceShip.getCurrentBehavior() == SpaceShip.Behavior.WARPED_OUT) {
+                continue;
+            }
+            if (filter != null && !filter.accept(spaceShip)) {
                 continue;
             }
 
@@ -47,5 +65,10 @@ public class GameUtils {
             }
         }
         return closestShip;
+    }
+
+    @FunctionalInterface
+    public interface ShipFilter {
+        boolean accept(SpaceShip ship);
     }
 }

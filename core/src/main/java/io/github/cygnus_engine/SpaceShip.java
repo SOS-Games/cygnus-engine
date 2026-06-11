@@ -111,9 +111,28 @@ public class SpaceShip extends GameObject {
 
     private Behavior currentBehavior = Behavior.FLYING_AROUND_TARGET;
 
-    private float warpSpeed = 600f; // max warp speed
+    private float warpSpeed = 1200f; // max warp speed
     private float warpTimer = 0f; // Timer for warp effects
+    private static final float WARP_OUT_RAMP_SECONDS = 2f;
+    private static final float WARP_OUT_CRUISE_SECONDS = 2f;
+    private static final float TRADER_DOCK_SECONDS = 4f;
+    private static final float TRADER_ARRIVAL_PADDING = 20f;
+    private static final float TRADER_ROUTE_SPEED_FRACTION = 0.9f;
+    private static final float MILITIA_RELOCATE_MIN_SECONDS = 10f;
+    private static final float MILITIA_RELOCATE_MAX_SECONDS = 30f;
+    private static final float MILITIA_TRANSIT_SPEED_FRACTION = 0.85f;
+    private static final float MILITIA_ARRIVAL_PADDING = 25f;
     private boolean isVisible = true;
+
+    private boolean trader = false;
+    private boolean militiaPatrol = false;
+    private boolean pirate = false;
+    private final Array<GameObject> tradeRoute = new Array<>();
+    private final Array<GameObject> patrolAnchors = new Array<>();
+    private GameObject tradeDestination;
+    private float tradeDockTimer = 0f;
+    private float patrolRelocateTimer = 0f;
+    private float patrolRelocateInterval = 45f;
 
     private final Array<ShipWeaponInstance> weaponInstances = new Array<>();
     /** Copy of hull {@link ShipData#colliders} for projectile hits. */
@@ -129,6 +148,9 @@ public class SpaceShip extends GameObject {
     public enum Behavior {
         FLYING_TO_TARGET,
         FLYING_AROUND_TARGET,
+        TRADER_TRANSIT,
+        TRADER_DOCKED,
+        MILITIA_TRANSIT,
         WARPING_OUT,
         WARPED_OUT,
         WARPING_IN,
@@ -225,6 +247,93 @@ public class SpaceShip extends GameObject {
         recomputeCombatRangesFromWeapons();
     }
 
+    /** Traders cycle all stops and dock at stations. */
+    public void configureAsTrader(Array<GameObject> stops) {
+        trader = true;
+        militiaPatrol = false;
+        pirate = false;
+        tradeRoute.clear();
+        if (stops != null) {
+            tradeRoute.addAll(stops);
+        }
+        combatTarget = null;
+        pickNextTradeDestination();
+        currentBehavior = Behavior.TRADER_TRANSIT;
+    }
+
+    /** Militia patrol one anchor at a time and occasionally relocate to another body. */
+    public void configureAsMilitiaPatrol(Array<GameObject> anchors) {
+        trader = false;
+        militiaPatrol = true;
+        pirate = false;
+        patrolAnchors.clear();
+        if (anchors != null) {
+            patrolAnchors.addAll(anchors);
+        }
+        combatTarget = null;
+        resetPatrolRelocateTimer();
+        currentBehavior = Behavior.FLYING_AROUND_TARGET;
+    }
+
+    /** Pirates arrive via warp-in only; they patrol locally after decelerating. */
+    public void configureAsPirate(GameObject anchor) {
+        trader = false;
+        militiaPatrol = false;
+        pirate = true;
+        if (anchor != null) {
+            orbitTarget = anchor;
+        }
+        combatTarget = null;
+    }
+
+    public boolean isTrader() {
+        return trader;
+    }
+
+    public boolean isMilitiaPatrol() {
+        return militiaPatrol;
+    }
+
+    public boolean isPirate() {
+        return pirate;
+    }
+
+    /** Place off-screen relative to {@code anchor} and begin the warp-in deceleration pass. */
+    public void beginWarpInNear(GameObject anchor) {
+        beginWarpInNear(anchor, 1000f);
+    }
+
+    public void beginWarpInNear(GameObject anchor, float distance) {
+        if (anchor != null) {
+            orbitTarget = anchor;
+        }
+        if (orbitTarget == null) {
+            return;
+        }
+
+        float angleDeg = MathUtils.random(0f, 360f);
+        setRotation(angleDeg);
+        targetAngle = angleDeg;
+
+        float rad = (float) Math.toRadians(angleDeg);
+        float dx = distance * (float) Math.cos(rad);
+        float dy = distance * (float) Math.sin(rad);
+        setX(orbitTarget.getX() - dx);
+        setY(orbitTarget.getY() - dy);
+
+        currentSpeed = warpSpeed;
+        targetForwardSpeed = warpSpeed;
+        targetStrafeSpeed = 0f;
+        isVisible = true;
+        warpTimer = 0f;
+        currentBehavior = Behavior.WARPING_IN;
+        refreshWorldTransformAndMountCaches();
+    }
+
+    public GameObject getTradeDestination() {
+        return tradeDestination;
+    }
+
     /** Standoff orbit radius/band and fire range from equipped weapon projectile travel distance. */
     private void recomputeCombatRangesFromWeapons() {
         float maxWeaponRange = 0f;
@@ -306,6 +415,26 @@ public class SpaceShip extends GameObject {
         return super.containsPoint(pointX, pointY);
     }
 
+    /** Hull-local pick radius from {@link #clickBounds}, or {@link #getSize()} when unset. */
+    public float getClickBoundsRadius() {
+        if (clickBounds != null && clickBounds.radius > 0f) {
+            return clickBounds.radius;
+        }
+        return getSize();
+    }
+
+    /** Transforms {@link #clickBounds} center to world space. Returns false when using ship center fallback. */
+    public boolean writeClickBoundsWorldCenter(Vector2 out) {
+        refreshWorldTransformAndMountCaches();
+        if (clickBounds != null && clickBounds.radius > 0f) {
+            out.set(clickBounds.x, clickBounds.y);
+            worldTransform.applyTo(out);
+            return true;
+        }
+        out.set(getX(), getY());
+        return false;
+    }
+
     private static CombatProfile parseCombatProfile(String raw) {
         if (raw == null) {
             return CombatProfile.FIGHTER;
@@ -345,20 +474,27 @@ public class SpaceShip extends GameObject {
             case WARPING_IN:
                 warpIn(deltaTime);
                 break;
+            case TRADER_TRANSIT:
+                updateTraderTransit();
+                updateWeaponAiming(deltaTime, null);
+                break;
+            case TRADER_DOCKED:
+                updateTraderDocked(deltaTime);
+                updateWeaponAiming(deltaTime, null);
+                break;
+            case MILITIA_TRANSIT:
+                updateMilitiaTransit();
+                updatePatrolOrCombat(deltaTime, projectileManager, null);
+                break;
             case FLYING_AROUND_TARGET:
             case FLYING_TO_TARGET:
-                //seekCombatTarget(deltaTime);
-                if (combatTarget != null) {
-                    updateCombatBehavior(deltaTime);
-                    updateWeaponAiming(deltaTime, combatTarget);
-                    tryFire(projectileManager);
-                } else {
-                    linedUpForShot = false;
-                    targetForwardSpeed = maxNormalSpeed;
-                    targetStrafeSpeed = 0f;
-                    updateWeaponAiming(deltaTime, null);
+                updatePatrolOrCombat(deltaTime, projectileManager, () -> {
                     changeDirectionPeriodically(deltaTime);
-                }
+                    if (militiaPatrol) {
+                        updateMilitiaPatrol(deltaTime);
+                    }
+                });
+                break;
         }
 
         updateRotation(deltaTime);
@@ -549,22 +685,142 @@ public class SpaceShip extends GameObject {
         return CustomMathUtils.normalizeAngle360(fromDeg + Math.signum(diff) * maxStepDeg);
     }
 
+    private void updateTraderTransit() {
+        if (tradeDestination == null) {
+            pickNextTradeDestination();
+            if (tradeDestination == null) {
+                return;
+            }
+        }
+
+        targetAngle = getAngleToTarget(tradeDestination.getX(), tradeDestination.getY());
+        targetForwardSpeed = maxNormalSpeed * TRADER_ROUTE_SPEED_FRACTION;
+        targetStrafeSpeed = 0f;
+
+        float arriveDist = tradeDestination.getSize() + getSize() + TRADER_ARRIVAL_PADDING;
+        if (getDistanceToSquared(tradeDestination) <= arriveDist * arriveDist) {
+            onTraderArrival();
+        }
+    }
+
+    private void updateTraderDocked(float deltaTime) {
+        targetForwardSpeed = 0f;
+        targetStrafeSpeed = 0f;
+        tradeDockTimer += deltaTime;
+        if (tradeDockTimer >= TRADER_DOCK_SECONDS) {
+            pickNextTradeDestination();
+        }
+    }
+
+    private void onTraderArrival() {
+        if (tradeDestination != null && tradeDestination.getType() == GameObject.Type.SPACE_STATION) {
+            currentBehavior = Behavior.TRADER_DOCKED;
+            tradeDockTimer = 0f;
+            targetForwardSpeed = 0f;
+            targetStrafeSpeed = 0f;
+            return;
+        }
+        pickNextTradeDestination();
+    }
+
+    private void pickNextTradeDestination() {
+        if (tradeRoute.size == 0) {
+            tradeDestination = null;
+            return;
+        }
+
+        GameObject next;
+        if (tradeRoute.size == 1) {
+            next = tradeRoute.first();
+        } else {
+            next = tradeRoute.get(MathUtils.random(tradeRoute.size - 1));
+            int guard = 0;
+            while (next == tradeDestination && guard++ < 16) {
+                next = tradeRoute.get(MathUtils.random(tradeRoute.size - 1));
+            }
+        }
+
+        tradeDestination = next;
+        orbitTarget = tradeDestination;
+        targetAngle = getAngleToTarget(tradeDestination.getX(), tradeDestination.getY());
+        currentBehavior = Behavior.TRADER_TRANSIT;
+        tradeDockTimer = 0f;
+    }
+
+    private void resetPatrolRelocateTimer() {
+        patrolRelocateTimer = 0f;
+        patrolRelocateInterval = MathUtils.random(
+            MILITIA_RELOCATE_MIN_SECONDS,
+            MILITIA_RELOCATE_MAX_SECONDS
+        );
+    }
+
+    private void updateMilitiaPatrol(float deltaTime) {
+        if (patrolAnchors.size < 2) {
+            return;
+        }
+        patrolRelocateTimer += deltaTime;
+        if (patrolRelocateTimer >= patrolRelocateInterval) {
+            pickNextPatrolAnchor();
+        }
+    }
+
+    private void pickNextPatrolAnchor() {
+        if (patrolAnchors.size == 0) {
+            return;
+        }
+
+        GameObject next;
+        if (patrolAnchors.size == 1) {
+            next = patrolAnchors.first();
+        } else {
+            next = patrolAnchors.get(MathUtils.random(patrolAnchors.size - 1));
+            int guard = 0;
+            while (next == orbitTarget && guard++ < 16) {
+                next = patrolAnchors.get(MathUtils.random(patrolAnchors.size - 1));
+            }
+        }
+
+        orbitTarget = next;
+        targetAngle = getAngleToTarget(orbitTarget.getX(), orbitTarget.getY());
+        currentBehavior = Behavior.MILITIA_TRANSIT;
+        resetPatrolRelocateTimer();
+    }
+
+    private void updateMilitiaTransit() {
+        if (orbitTarget == null) {
+            currentBehavior = Behavior.FLYING_AROUND_TARGET;
+            return;
+        }
+
+        targetAngle = getAngleToTarget(orbitTarget.getX(), orbitTarget.getY());
+        targetForwardSpeed = maxNormalSpeed * MILITIA_TRANSIT_SPEED_FRACTION;
+        targetStrafeSpeed = 0f;
+
+        float arriveDist = orbitTarget.getSize() + getSize() + MILITIA_ARRIVAL_PADDING;
+        if (getDistanceToOrbitTargetSquared() <= arriveDist * arriveDist) {
+            currentBehavior = Behavior.FLYING_AROUND_TARGET;
+            resetPatrolRelocateTimer();
+            directionChangeTimer = 0f;
+        }
+    }
+
     private void warpOut(float deltaTime) {
         warpTimer += deltaTime;
 
-        // we should go from maxNormalSpeed to warpSpeed over the course of 2 seconds, then disappear
-        float _warpTimer = MathUtils.clamp(warpTimer, 0f, 2f);
-        targetForwardSpeed = MathUtils.lerp(maxNormalSpeed, warpSpeed, _warpTimer / 2f);
+        if (warpTimer <= WARP_OUT_RAMP_SECONDS) {
+            targetForwardSpeed = MathUtils.lerp(
+                maxNormalSpeed,
+                warpSpeed,
+                warpTimer / WARP_OUT_RAMP_SECONDS
+            );
+        } else {
+            targetForwardSpeed = warpSpeed;
+        }
         targetStrafeSpeed = 0f;
-        
-        // note: let updatePostion handle the actual movement based on currentSpeed and rotation, we just need to set the rotation towards the direction we want to warp out in
-        
-        // Disappear after getting away from the planet or station
-        Boolean farFromOrbitTarget = getDistanceToOrbitTargetSquared() > enterWarpWhenFarFromOrbitTargetDistanceSquared;
-        if (farFromOrbitTarget && warpTimer > 2f) {
-            //System.out.println("Warp out ... ship disappeared");
+
+        if (warpTimer >= WARP_OUT_RAMP_SECONDS + WARP_OUT_CRUISE_SECONDS) {
             isVisible = false;
-            // Schedule warp in after a delay
             warpTimer = 0f;
             currentBehavior = Behavior.WARPED_OUT;
         }
@@ -573,7 +829,7 @@ public class SpaceShip extends GameObject {
     private void warpedOut(float deltaTime) {
         // ship should not be moving during this time
         warpTimer += deltaTime;
-        if (warpTimer > 2f) {
+        if (warpTimer > 5f) {
             currentBehavior = Behavior.WARPING_IN;
             warpTimer = 0f;
 
@@ -606,8 +862,48 @@ public class SpaceShip extends GameObject {
 
         // switch to normal flying if we have slowed down
         if (warpTimer > 2f) {
-            warpTimer = 0f;
+            finishWarpIn();
+        }
+    }
+
+    private void finishWarpIn() {
+        warpTimer = 0f;
+        if (trader) {
+            currentBehavior = Behavior.TRADER_TRANSIT;
+        } else if (militiaPatrol) {
             currentBehavior = Behavior.FLYING_AROUND_TARGET;
+            resetPatrolRelocateTimer();
+        } else {
+            currentBehavior = Behavior.FLYING_AROUND_TARGET;
+        }
+    }
+
+    private void updatePatrolOrCombat(float deltaTime, ProjectileManager projectileManager, Runnable idlePatrol) {
+        if (trader || (!militiaPatrol && !pirate)) {
+            combatTarget = null;
+            linedUpForShot = false;
+            targetForwardSpeed = maxNormalSpeed;
+            targetStrafeSpeed = 0f;
+            updateWeaponAiming(deltaTime, null);
+            if (idlePatrol != null) {
+                idlePatrol.run();
+            }
+            return;
+        }
+
+        seekCombatTarget(deltaTime);
+        if (combatTarget != null) {
+            updateCombatBehavior(deltaTime);
+            updateWeaponAiming(deltaTime, combatTarget);
+            tryFire(projectileManager);
+        } else {
+            linedUpForShot = false;
+            targetForwardSpeed = maxNormalSpeed;
+            targetStrafeSpeed = 0f;
+            updateWeaponAiming(deltaTime, null);
+            if (idlePatrol != null) {
+                idlePatrol.run();
+            }
         }
     }
 
@@ -616,16 +912,65 @@ public class SpaceShip extends GameObject {
         if (seekCombatTargetTimer >= seekCombatTargetInterval) {
             seekCombatTargetTimer = 0f;
 
-            GameObject closestShipWithinRange = getClosestShipWithinRange(detectCombatDistanceSquared);
-            if (closestShipWithinRange != combatTarget && closestShipWithinRange != null) {
+            GameObject preferredTarget = findPreferredCombatTarget();
+            if (preferredTarget != combatTarget && preferredTarget != null) {
                 orbitSign = MathUtils.randomBoolean() ? 1f : -1f;
             }
-            if (isValidCombatTarget(closestShipWithinRange)) {
-                combatTarget = closestShipWithinRange;
+            if (isAllowedCombatTarget(preferredTarget)) {
+                combatTarget = preferredTarget;
             } else {
                 combatTarget = null;
             }
         }
+    }
+
+    private GameObject findPreferredCombatTarget() {
+        if (militiaPatrol) {
+            return GameUtils.getClosestShipWithinRange(
+                detectCombatDistanceSquared,
+                getX(),
+                getY(),
+                this,
+                SpaceShip::isPirate
+            );
+        }
+        if (pirate) {
+            GameObject traderTarget = GameUtils.getClosestShipWithinRange(
+                detectCombatDistanceSquared,
+                getX(),
+                getY(),
+                this,
+                SpaceShip::isTrader
+            );
+            if (traderTarget != null) {
+                return traderTarget;
+            }
+            return GameUtils.getClosestShipWithinRange(
+                detectCombatDistanceSquared,
+                getX(),
+                getY(),
+                this,
+                SpaceShip::isMilitiaPatrol
+            );
+        }
+        return null;
+    }
+
+    private boolean isAllowedCombatTarget(GameObject target) {
+        if (!isValidCombatTarget(target)) {
+            return false;
+        }
+        SpaceShip targetShip = (SpaceShip) target;
+        if (trader) {
+            return false;
+        }
+        if (militiaPatrol) {
+            return targetShip.isPirate();
+        }
+        if (pirate) {
+            return targetShip.isTrader() || targetShip.isMilitiaPatrol();
+        }
+        return false;
     }
 
     private static boolean isValidCombatTarget(GameObject target) {
@@ -641,12 +986,8 @@ public class SpaceShip extends GameObject {
         return targetShip.getCurrentBehavior() != Behavior.WARPED_OUT;
     }
 
-    private GameObject getClosestShipWithinRange(float range) {
-        return GameUtils.getClosestShipWithinRange(range, getX(), getY(), this);
-    }
-
     private void updateCombatBehavior(float deltaTime) {
-        if (!isValidCombatTarget(combatTarget)) {
+        if (!isAllowedCombatTarget(combatTarget)) {
             combatTarget = null;
         }
 
@@ -963,7 +1304,7 @@ public class SpaceShip extends GameObject {
 
     /** Multi-line debug snapshot of the current combat target for the info window. */
     public String buildCombatTargetDebugText() {
-        GameObject seekPick = getClosestShipWithinRange(detectCombatDistanceSquared);
+        GameObject seekPick = findPreferredCombatTarget();
         StringBuilder sb = new StringBuilder();
 
         if (combatTarget == null) {

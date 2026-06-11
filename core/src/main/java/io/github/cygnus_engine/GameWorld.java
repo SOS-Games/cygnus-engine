@@ -31,6 +31,11 @@ public class GameWorld {
     /** Ships spawn between (anchor size + ship radius + this) and + max extra offset from anchor. */
     private static final float SHIP_SPAWN_MIN_CLEARANCE = 120f;
     private static final float SHIP_SPAWN_MAX_EXTRA_RADIUS = 220f;
+    /** Fraction of spawned ships that run trade routes between orbit bodies. */
+    private static final float TRADER_SHIP_FRACTION = 0.66f;
+    private static final float PIRATE_WARP_IN_MIN_SECONDS = 5f;
+    private static final float PIRATE_WARP_IN_MAX_SECONDS = 15f;
+    private static final int MAX_ACTIVE_PIRATES = 6;
     
     private ShapeRenderer shapeRenderer;
     private OrthographicCamera camera;
@@ -40,6 +45,9 @@ public class GameWorld {
     private Array<SpaceShip> spaceShips;
     private float warpTimer;
     private float warpInterval;
+    private float pirateSpawnTimer;
+    private float pirateSpawnInterval;
+    private int pirateSpawnCounter;
     private GameObject selectedObject;
     private SpaceShip cameraFollowTarget;
     private float cameraZoom = 1f;
@@ -69,6 +77,9 @@ public class GameWorld {
         engineTrailRenderer = new EngineTrailRenderer();
         warpTimer = 0f;
         warpInterval = 10f; // Warp every 10 seconds on average
+        pirateSpawnTimer = 0f;
+        pirateSpawnInterval = MathUtils.random(PIRATE_WARP_IN_MIN_SECONDS, PIRATE_WARP_IN_MAX_SECONDS);
+        pirateSpawnCounter = 0;
 
         spriteBatch = new SpriteBatch();
         spriteBatch.setProjectionMatrix(camera.combined);
@@ -152,11 +163,12 @@ public class GameWorld {
             throw new IllegalStateException("No ship templates found under mods/. Add ship JSON files before playing.");
         }
         
-        for (int i = 0; i < 12; i++) {
+        for (int i = 0; i < 10; i++) {
             GameObject orbitTarget = pickRandomOrbitTarget();
             ShipData template = shipTemplates.get(MathUtils.random(shipTemplates.size - 1));
             float shipRadius = shipRadiusFromShipData(template);
-            spawnShipNearOrbitTarget(i, orbitTarget, template, shipRadius);
+            boolean asTrader = MathUtils.random() < TRADER_SHIP_FRACTION && orbitTargets.size >= 2;
+            spawnShipNearOrbitTarget(i, orbitTarget, template, shipRadius, asTrader);
         }
     }
 
@@ -169,7 +181,13 @@ public class GameWorld {
         return orbitTargets.get(MathUtils.random(orbitTargets.size - 1));
     }
 
-    private void spawnShipNearOrbitTarget(int index, GameObject orbitTarget, ShipData template, float shipRadius) {
+    private void spawnShipNearOrbitTarget(
+        int index,
+        GameObject orbitTarget,
+        ShipData template,
+        float shipRadius,
+        boolean asTrader
+    ) {
         float angleDeg = MathUtils.random(0f, 360f);
         float minDist = orbitTarget.getSize() + shipRadius + SHIP_SPAWN_MIN_CLEARANCE;
         float maxDist = minDist + SHIP_SPAWN_MAX_EXTRA_RADIUS;
@@ -177,21 +195,82 @@ public class GameWorld {
         float x = orbitTarget.getX() + MathUtils.cosDeg(angleDeg) * dist;
         float y = orbitTarget.getY() + MathUtils.sinDeg(angleDeg) * dist;
 
+        String rolePrefix = asTrader ? "Trader" : "Militia";
         SpaceShip ship = new SpaceShip(
             x,
             y,
             shipRadius,
-            "Ship " + (index + 1) + " (" + template.id + ")",
+            rolePrefix + " " + (index + 1) + " (" + template.id + ")",
             orbitTarget,
             template.speed
         );
         ship.configureFromShipData(template);
         ship.setHullSprite(createHullSprite(template));
         ship.configureWeaponInstances(buildWeaponInstances(template));
+        if (asTrader) {
+            ship.configureAsTrader(orbitTargets);
+        } else {
+            ship.configureAsMilitiaPatrol(orbitTargets);
+        }
 
         spaceShips.add(ship);
         gameObjects.add(ship);
         GameUtils.addSpaceShip(ship);
+    }
+
+    private void trySpawnPirateWarpIn() {
+        if (shipTemplates.isEmpty() || orbitTargets.isEmpty()) {
+            return;
+        }
+        if (countActivePirates() >= MAX_ACTIVE_PIRATES) {
+            return;
+        }
+
+        GameObject anchor = pickRandomOrbitTarget();
+        ShipData template = shipTemplates.get(MathUtils.random(shipTemplates.size - 1));
+        float shipRadius = shipRadiusFromShipData(template);
+
+        pirateSpawnCounter++;
+        SpaceShip ship = new SpaceShip(
+            0f,
+            0f,
+            shipRadius,
+            "Pirate " + pirateSpawnCounter + " (" + template.id + ")",
+            anchor,
+            template.speed
+        );
+        ship.configureFromShipData(template);
+        ship.setHullSprite(createHullSprite(template));
+        ship.configureWeaponInstances(buildWeaponInstances(template));
+        ship.configureAsPirate(anchor);
+        ship.beginWarpInNear(anchor);
+
+        spaceShips.add(ship);
+        gameObjects.add(ship);
+        GameUtils.addSpaceShip(ship);
+    }
+
+    private int countActivePirates() {
+        int count = 0;
+        for (SpaceShip ship : spaceShips) {
+            if (ship.isPirate()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private SpaceShip pickRandomNonPirateShip() {
+        if (spaceShips.isEmpty()) {
+            return null;
+        }
+        for (int attempt = 0; attempt < spaceShips.size; attempt++) {
+            SpaceShip ship = spaceShips.get(MathUtils.random(spaceShips.size - 1));
+            if (!ship.isPirate()) {
+                return ship;
+            }
+        }
+        return null;
     }
 
     private void ensureOrbitTargetsNonEmpty() {
@@ -315,20 +394,24 @@ public class GameWorld {
             }
         }
         
-        // Occasionally trigger warp out for space ships
+        // Occasionally trigger warp out for non-pirate ships (test / ambient traffic)
         warpTimer += deltaTime;
         if (warpTimer >= warpInterval) {
-            //System.out.println("Warp out ...");
             warpTimer = 0f;
-            //warpInterval = MathUtils.random(2f, 4f);
-            /*
-            // Randomly select a ship to warp out
-            if (spaceShips.size > 0 && MathUtils.randomBoolean(1.0f)) {
-                System.out.println("Warp out ... selecting ship");
-                int index = MathUtils.random(spaceShips.size - 1);
-                spaceShips.get(index).triggerWarpOut();
+
+            if (MathUtils.randomBoolean(1.0f)) {
+                SpaceShip ship = pickRandomNonPirateShip();
+                if (ship != null) {
+                    ship.triggerWarpOut();
+                }
             }
-                 */
+        }
+
+        pirateSpawnTimer += deltaTime;
+        if (pirateSpawnTimer >= pirateSpawnInterval) {
+            pirateSpawnTimer = 0f;
+            pirateSpawnInterval = MathUtils.random(PIRATE_WARP_IN_MIN_SECONDS, PIRATE_WARP_IN_MAX_SECONDS);
+            trySpawnPirateWarpIn();
         }
 
         updateCamera(deltaTime);
@@ -507,8 +590,41 @@ public class GameWorld {
         shapeRenderer.end();
 
         shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+        drawShipClickBoundsOutlines(pinnedShip);
         drawPinnedOrbitTargetIndicator();
         shapeRenderer.end();
+    }
+
+    private void drawShipClickBoundsOutlines(SpaceShip pinnedShip) {
+        boolean following = isFollowingShip();
+        for (GameObject obj : gameObjects) {
+            if (!(obj instanceof SpaceShip ship) || !ship.isVisible()) {
+                continue;
+            }
+            if (ship.isTrader()) {
+                shapeRenderer.setColor(1f, 1f, 1f, 0.9f);
+            } else if (ship.isMilitiaPatrol()) {
+                shapeRenderer.setColor(0.35f, 0.55f, 1f, 0.9f);
+            } else if (ship.isPirate()) {
+                shapeRenderer.setColor(1f, 0.3f, 0.3f, 0.9f);
+            } else {
+                continue;
+            }
+
+            float radius = ship.getClickBoundsRadius();
+            ship.writeClickBoundsWorldCenter(renderSnapScratch);
+            float cx = renderSnapScratch.x;
+            float cy = renderSnapScratch.y;
+
+            boolean pinned = ship == pinnedShip && following;
+            if (!pinned) {
+                snapWorldPoint(cx, cy, renderSnapScratch);
+                cx = renderSnapScratch.x;
+                cy = renderSnapScratch.y;
+            }
+
+            shapeRenderer.circle(cx, cy, radius);
+        }
     }
 
     private void drawSelectionIndicators() {
