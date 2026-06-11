@@ -34,11 +34,12 @@ public class ModdingScreen {
 
     private ScreenListener listener;
     private ShipEditor shipEditor;
+    private StarSystemEditor starSystemEditor;
     private Stage stage;
     private Skin skin;
 
-    private enum Mode { LIST, EDIT_SHIP, EDIT_WEAPON }
-    private enum ListTab { SHIPS, WEAPONS }
+    private enum Mode { LIST, EDIT_SHIP, EDIT_WEAPON, EDIT_SYSTEM }
+    private enum ListTab { SHIPS, WEAPONS, SYSTEMS }
 
     private Mode mode = Mode.LIST;
     private ListTab listTab = ListTab.SHIPS;
@@ -46,12 +47,15 @@ public class ModdingScreen {
     private Window listWindow;
     private Window editorTopBar;
     private Window editorLeftPanel;
+    private Window systemEditorTopBar;
+    private Window systemEditorLeftPanel;
     private Window weaponEditorWindow;
 
     private Table listInnerTable;
 
     private FileHandle editingShipJson;
     private FileHandle editingWeaponJson;
+    private FileHandle editingSystemJson;
     private WeaponData editingWeapon;
 
     private TextField speedField;
@@ -65,6 +69,15 @@ public class ModdingScreen {
     private TextButton equipWeaponButton;
     private TextButton deleteSelectionButton;
     private Table mountActionsRow;
+
+    private Label systemSelectionLabel;
+    private TextField systemNameField;
+    private TextField systemWorldWidthField;
+    private TextField systemWorldHeightField;
+    private TextField bodyNameField;
+    private TextField bodyXField;
+    private TextField bodyYField;
+    private TextField bodySizeField;
 
     private Texture weaponPreviewTexture;
     private Image weaponPreviewImage;
@@ -86,6 +99,7 @@ public class ModdingScreen {
         this.stage = stage;
         this.skin = skin;
         this.shipEditor = new ShipEditor();
+        this.starSystemEditor = new StarSystemEditor();
         this.listener = listener;
 
         buildListUI();
@@ -97,6 +111,8 @@ public class ModdingScreen {
         mux.addProcessor(stage);
         if (mode == Mode.EDIT_SHIP) {
             mux.addProcessor(shipEditor.getInputProcessor());
+        } else if (mode == Mode.EDIT_SYSTEM) {
+            mux.addProcessor(starSystemEditor.getInputProcessor());
         }
         Gdx.input.setInputProcessor(mux);
     }
@@ -105,6 +121,7 @@ public class ModdingScreen {
         stage.clear();
         mode = Mode.LIST;
         removeShipEditorPanels();
+        removeSystemEditorPanels();
         if (weaponEditorWindow != null) {
             weaponEditorWindow.remove();
             weaponEditorWindow = null;
@@ -149,6 +166,15 @@ public class ModdingScreen {
             }
         });
 
+        TextButton systemsTab = new TextButton("Systems", skin);
+        systemsTab.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                listTab = ListTab.SYSTEMS;
+                buildListUI();
+            }
+        });
+
         TextButton createShipButton = new TextButton("Create ship…", skin);
         createShipButton.addListener(new ChangeListener() {
             @Override
@@ -165,6 +191,14 @@ public class ModdingScreen {
             }
         });
 
+        TextButton createSystemButton = new TextButton("Create system…", skin);
+        createSystemButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                openCreateSystemDialog();
+            }
+        });
+
         listWindow.add(backButton).left();
         listWindow.add(refreshButton).right().row();
 
@@ -172,11 +206,14 @@ public class ModdingScreen {
         tabRow.defaults().pad(4f);
         tabRow.add(new Label("Category:", skin)).padRight(8f);
         tabRow.add(shipsTab);
-        tabRow.add(weaponsTab).row();
+        tabRow.add(weaponsTab);
+        tabRow.add(systemsTab).row();
         if (listTab == ListTab.SHIPS) {
             tabRow.add(createShipButton).padTop(4f);
-        } else {
+        } else if (listTab == ListTab.WEAPONS) {
             tabRow.add(createWeaponButton).padTop(4f);
+        } else {
+            tabRow.add(createSystemButton).padTop(4f);
         }
         listWindow.add(tabRow).left().row();
 
@@ -184,8 +221,10 @@ public class ModdingScreen {
         listInnerTable.defaults().pad(4f).left();
         if (listTab == ListTab.SHIPS) {
             populateShipJsonList(listInnerTable);
-        } else {
+        } else if (listTab == ListTab.WEAPONS) {
             populateWeaponJsonList(listInnerTable);
+        } else {
+            populateSystemJsonList(listInnerTable);
         }
 
         ScrollPane scrollPane = new ScrollPane(listInnerTable, skin);
@@ -315,10 +354,49 @@ public class ModdingScreen {
         }
     }
 
+    private void populateSystemJsonList(Table table) {
+        List<FileHandle> files = StarSystemDataIO.collectSystemJsonFiles();
+        if (files.isEmpty()) {
+            Label empty = new Label(
+                "No star system JSON found. Add mods/<mod>/systems/*.json or use Create system.",
+                skin
+            );
+            empty.setWrap(true);
+            table.add(empty).width(680f).row();
+            return;
+        }
+
+        table.add(new Label("System id", skin)).width(200f);
+        table.add(new Label("Path", skin)).width(380f);
+        table.add(new Label("", skin)).width(100f).row();
+
+        for (FileHandle jsonFile : files) {
+            StarSystemData peek = StarSystemDataIO.loadFromJson(jsonFile);
+            String id = peek != null && peek.id != null && !peek.id.isBlank()
+                ? peek.id
+                : jsonFile.nameWithoutExtension();
+            int bodyCount = peek != null && peek.bodies != null ? peek.bodies.size() : 0;
+
+            table.add(new Label(id + " (" + bodyCount + " bodies)", skin)).width(200f);
+            table.add(new Label(jsonFile.path(), skin)).width(380f);
+
+            TextButton editButton = new TextButton("Edit", skin);
+            FileHandle jsonRef = jsonFile;
+            editButton.addListener(new ChangeListener() {
+                @Override
+                public void changed(ChangeEvent event, Actor actor) {
+                    openSystemEditor(jsonRef);
+                }
+            });
+            table.add(editButton).width(100f).row();
+        }
+    }
+
     private void openShipEditor(FileHandle jsonFile) {
         mode = Mode.EDIT_SHIP;
         editingShipJson = jsonFile;
         if (listWindow != null) listWindow.remove();
+        removeSystemEditorPanels();
         if (weaponEditorWindow != null) {
             weaponEditorWindow.remove();
             weaponEditorWindow = null;
@@ -337,6 +415,17 @@ public class ModdingScreen {
         if (editorLeftPanel != null) {
             editorLeftPanel.remove();
             editorLeftPanel = null;
+        }
+    }
+
+    private void removeSystemEditorPanels() {
+        if (systemEditorTopBar != null) {
+            systemEditorTopBar.remove();
+            systemEditorTopBar = null;
+        }
+        if (systemEditorLeftPanel != null) {
+            systemEditorLeftPanel.remove();
+            systemEditorLeftPanel = null;
         }
     }
 
@@ -541,6 +630,248 @@ public class ModdingScreen {
 
         layoutShipEditorPanels();
         refreshSelectionUI();
+    }
+
+    private void openSystemEditor(FileHandle jsonFile) {
+        mode = Mode.EDIT_SYSTEM;
+        editingSystemJson = jsonFile;
+        if (listWindow != null) {
+            listWindow.remove();
+        }
+        removeShipEditorPanels();
+        if (weaponEditorWindow != null) {
+            weaponEditorWindow.remove();
+            weaponEditorWindow = null;
+        }
+
+        starSystemEditor.loadFromDefinition(jsonFile);
+        buildSystemEditorUI();
+        setupInput();
+    }
+
+    private void layoutSystemEditorPanels() {
+        if (systemEditorTopBar == null) {
+            return;
+        }
+
+        float stageW = stage.getWidth();
+        float stageH = stage.getHeight();
+        float topH = systemEditorTopBar.getHeight();
+        systemEditorTopBar.setSize(stageW, topH);
+        systemEditorTopBar.setPosition(0f, stageH - topH);
+
+        float leftW = systemEditorLeftPanel != null ? systemEditorLeftPanel.getWidth() : 0f;
+        if (systemEditorLeftPanel != null) {
+            systemEditorLeftPanel.setPosition(0f, 0f);
+            systemEditorLeftPanel.setHeight(Math.max(0f, stageH - topH));
+        }
+
+        starSystemEditor.setViewportInsets(leftW, topH, 0f, 0f);
+        starSystemEditor.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+    }
+
+    private void buildSystemEditorUI() {
+        removeSystemEditorPanels();
+
+        StarSystemData data = starSystemEditor.getSystemData();
+        String titleId = data != null ? data.id : editingSystemJson.nameWithoutExtension();
+        systemEditorTopBar = new Window("Edit Star System — " + titleId, skin, "border");
+        systemEditorTopBar.defaults().pad(4f);
+
+        TextButton backButton = new TextButton("Back to list", skin);
+        backButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                buildListUI();
+            }
+        });
+
+        TextButton addPlanetButton = new TextButton("Add planet", skin);
+        addPlanetButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                starSystemEditor.addPlanet();
+                refreshSystemSelectionUI();
+            }
+        });
+
+        TextButton addStationButton = new TextButton("Add station", skin);
+        addStationButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                starSystemEditor.addStation();
+                refreshSystemSelectionUI();
+            }
+        });
+
+        TextButton deleteButton = new TextButton("Delete selected", skin);
+        deleteButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (starSystemEditor.deleteSelected()) {
+                    refreshSystemSelectionUI();
+                }
+            }
+        });
+
+        TextButton saveButton = new TextButton("Save JSON", skin);
+        saveButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                applySystemFieldsToData();
+                StarSystemDataIO.save(starSystemEditor.getSystemData(), editingSystemJson);
+            }
+        });
+
+        systemEditorTopBar.add(backButton).padRight(6f);
+        systemEditorTopBar.add(addPlanetButton).padRight(6f);
+        systemEditorTopBar.add(addStationButton).padRight(6f);
+        systemEditorTopBar.add(deleteButton).padRight(6f);
+        systemEditorTopBar.add(saveButton).padRight(6f).row();
+
+        systemEditorLeftPanel = new Window("System & selection", skin, "border");
+        systemEditorLeftPanel.defaults().pad(4f).left();
+
+        systemSelectionLabel = new Label("", skin);
+        systemSelectionLabel.setWrap(true);
+
+        systemNameField = new TextField(data != null ? data.name : "", skin);
+        systemWorldWidthField = new TextField(data != null ? Float.toString(data.worldWidth) : "800", skin);
+        systemWorldHeightField = new TextField(data != null ? Float.toString(data.worldHeight) : "600", skin);
+        bodyNameField = new TextField("", skin);
+        bodyXField = new TextField("", skin);
+        bodyYField = new TextField("", skin);
+        bodySizeField = new TextField("", skin);
+
+        Table fields = new Table(skin);
+        fields.defaults().pad(4f).left();
+        fields.add(new Label("Display name", skin)).width(110f);
+        fields.add(systemNameField).width(140f).row();
+        fields.add(new Label("Play width", skin)).width(110f);
+        fields.add(systemWorldWidthField).width(80f).row();
+        fields.add(new Label("Play height", skin)).width(110f);
+        fields.add(systemWorldHeightField).width(80f).row();
+        Label viewportHint = new Label("(green box = play viewport)", skin);
+        viewportHint.setWrap(true);
+        fields.add(viewportHint).colspan(2).width(250f).row();
+        fields.add(systemSelectionLabel).colspan(2).width(250f).padTop(8f).row();
+        fields.add(new Label("Body name", skin)).width(110f);
+        fields.add(bodyNameField).width(140f).row();
+        fields.add(new Label("X", skin)).width(110f);
+        fields.add(bodyXField).width(80f).row();
+        fields.add(new Label("Y", skin)).width(110f);
+        fields.add(bodyYField).width(80f).row();
+        fields.add(new Label("Size", skin)).width(110f);
+        fields.add(bodySizeField).width(80f).row();
+        Label dragHint = new Label("(drag map or edit fields)", skin);
+        dragHint.setWrap(true);
+        fields.add(dragHint).colspan(2).width(250f).row();
+
+        systemEditorLeftPanel.add(fields).left().row();
+
+        systemEditorTopBar.pack();
+        systemEditorLeftPanel.pack();
+
+        stage.addActor(systemEditorLeftPanel);
+        stage.addActor(systemEditorTopBar);
+
+        layoutSystemEditorPanels();
+        refreshSystemSelectionUI();
+    }
+
+    private void applySystemFieldsToData() {
+        StarSystemData data = starSystemEditor.getSystemData();
+        if (data == null) {
+            return;
+        }
+
+        data.name = systemNameField.getText().trim();
+        if (data.name.isBlank()) {
+            data.name = data.id;
+        }
+        data.worldWidth = parseFloatSafe(systemWorldWidthField, data.worldWidth);
+        data.worldHeight = parseFloatSafe(systemWorldHeightField, data.worldHeight);
+
+        StarSystemBody selected = starSystemEditor.getSelectedBody();
+        if (selected != null) {
+            selected.name = bodyNameField.getText().trim();
+            if (selected.name.isBlank()) {
+                selected.normalize();
+            }
+            selected.x = parseFloatSafe(bodyXField, selected.x);
+            selected.y = parseFloatSafe(bodyYField, selected.y);
+            selected.size = parseFloatSafe(bodySizeField, selected.size);
+            selected.normalize();
+        }
+        data.normalize();
+    }
+
+    private void refreshSystemSelectionUI() {
+        if (systemSelectionLabel != null) {
+            systemSelectionLabel.setText(starSystemEditor.getSelectionSummary());
+        }
+
+        StarSystemBody selected = starSystemEditor.getSelectedBody();
+        if (selected == null) {
+            if (bodyNameField != null) bodyNameField.setText("");
+            if (bodyXField != null) bodyXField.setText("");
+            if (bodyYField != null) bodyYField.setText("");
+            if (bodySizeField != null) bodySizeField.setText("");
+            return;
+        }
+
+        bodyNameField.setText(selected.name);
+        bodyXField.setText(Integer.toString(Math.round(selected.x)));
+        bodyYField.setText(Integer.toString(Math.round(selected.y)));
+        bodySizeField.setText(Integer.toString(Math.round(selected.size)));
+    }
+
+    private void openCreateSystemDialog() {
+        FileHandle systemsDir = Gdx.files.local("mods/core/systems");
+        systemsDir.mkdirs();
+
+        Dialog dialog = new Dialog("Create star system", skin, "dialog") {
+            @Override
+            protected void result(Object object) {
+            }
+        };
+        dialog.getContentTable().defaults().pad(6f).growX();
+
+        final Label err = new Label("", skin);
+        err.setWrap(true);
+        final TextField idField = new TextField("", skin);
+        idField.setMessageText("system_id");
+
+        dialog.getContentTable().add(new Label("New system id (creates mods/core/systems/<id>.json):", skin)).left().row();
+        dialog.getContentTable().add(idField).width(420f).row();
+        dialog.getContentTable().add(err).width(420f).row();
+
+        TextButton create = new TextButton("Create", skin);
+        create.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                String stem = sanitizeFileStem(idField.getText());
+                if (stem.isBlank()) {
+                    err.setText("Enter a valid id.");
+                    return;
+                }
+                FileHandle jsonOut = systemsDir.child(stem + ".json");
+                if (jsonOut.exists()) {
+                    err.setText("File already exists: " + jsonOut.path());
+                    return;
+                }
+                StarSystemData data = StarSystemDataIO.createDefaultLayout(stem);
+                StarSystemDataIO.save(data, jsonOut);
+                dialog.hide();
+                listTab = ListTab.SYSTEMS;
+                buildListUI();
+                openSystemEditor(jsonOut);
+            }
+        });
+        dialog.getContentTable().add(create).row();
+
+        dialog.button("Cancel", false);
+        dialog.show(stage);
     }
 
     private void openHullTexturePickerDialog() {
@@ -784,6 +1115,7 @@ public class ModdingScreen {
 
         if (listWindow != null) listWindow.remove();
         removeShipEditorPanels();
+        removeSystemEditorPanels();
 
         buildWeaponEditorUI();
         setupInput();
@@ -1069,26 +1401,36 @@ public class ModdingScreen {
         if (mode == Mode.EDIT_SHIP) {
             shipEditor.update(deltaTime);
             refreshSelectionUI();
+        } else if (mode == Mode.EDIT_SYSTEM) {
+            starSystemEditor.update(deltaTime);
+            refreshSystemSelectionUI();
         }
     }
 
     public void render() {
         if (mode == Mode.EDIT_SHIP) {
             shipEditor.render();
+        } else if (mode == Mode.EDIT_SYSTEM) {
+            starSystemEditor.render();
         }
     }
 
     public void resize(int width, int height) {
         if (mode == Mode.EDIT_SHIP) {
             layoutShipEditorPanels();
+        } else if (mode == Mode.EDIT_SYSTEM) {
+            layoutSystemEditorPanels();
         } else {
             shipEditor.setViewportInsets(0f, 0f, 0f, 0f);
             shipEditor.resize(width, height);
+            starSystemEditor.setViewportInsets(0f, 0f, 0f, 0f);
+            starSystemEditor.resize(width, height);
         }
     }
 
     public void dispose() {
         disposeWeaponPreviewTexture();
         shipEditor.dispose();
+        starSystemEditor.dispose();
     }
 }

@@ -1,0 +1,25 @@
+{
+"id": "default",
+"name": "Default System",
+"bodies": [
+	{
+		"name": "Planet",
+		"x": -200,
+		"y": 760
+	},
+	{
+		"type": "SPACE_STATION",
+		"name": "Space Station",
+		"x": 1220,
+		"y": 400,
+		"size": 50
+	},
+	{
+		"type": "SPACE_STATION",
+		"name": "Station 2",
+		"x": 120,
+		"y": -280,
+		"size": 50
+	}
+]
+}

@@ -347,7 +347,7 @@ public class SpaceShip extends GameObject {
                 break;
             case FLYING_AROUND_TARGET:
             case FLYING_TO_TARGET:
-                seekCombatTarget(deltaTime);
+                //seekCombatTarget(deltaTime);
                 if (combatTarget != null) {
                     updateCombatBehavior(deltaTime);
                     updateWeaponAiming(deltaTime, combatTarget);

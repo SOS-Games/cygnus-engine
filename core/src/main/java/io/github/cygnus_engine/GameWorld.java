@@ -28,12 +28,15 @@ public class GameWorld {
     private static final float CAMERA_FOLLOW_SPEED = 5f;
     /** Quantize rendered hull/turret angles to reduce nearest-neighbor crawl while turning. */
     private static final float RENDER_ANGLE_SNAP_DEG = 0.5f;
+    /** Ships spawn between (anchor size + ship radius + this) and + max extra offset from anchor. */
+    private static final float SHIP_SPAWN_MIN_CLEARANCE = 120f;
+    private static final float SHIP_SPAWN_MAX_EXTRA_RADIUS = 220f;
     
     private ShapeRenderer shapeRenderer;
     private OrthographicCamera camera;
     private Array<GameObject> gameObjects;
-    private GameObject planet;
-    private GameObject spaceStation;
+    /** Planets and stations ships may patrol around (from star-system JSON). */
+    private final Array<GameObject> orbitTargets = new Array<>();
     private Array<SpaceShip> spaceShips;
     private float warpTimer;
     private float warpInterval;
@@ -123,44 +126,108 @@ public class GameWorld {
     }
     
     private void initialize() {
-        // Create planet (circle) - center-left of world
-        planet = new GameObject(GameObject.Type.PLANET, -WORLD_WIDTH * 0.25f, WORLD_HEIGHT * 0.5f, 40f, "Planet");
-        gameObjects.add(planet);
-        
-        // Create space station (square) - center-right of world
-        spaceStation = new GameObject(GameObject.Type.SPACE_STATION, WORLD_WIDTH * 1.25f, WORLD_HEIGHT * 0.5f, 50f, "Space Station");
-        gameObjects.add(spaceStation);
+        StarSystemData systemLayout = StarSystemDataIO.loadPreferredForGameplay();
+        if (systemLayout != null && systemLayout.bodies != null && !systemLayout.bodies.isEmpty()) {
+            loadBodiesFromStarSystem(systemLayout);
+        } else {
+            addOrbitTarget(new GameObject(
+                GameObject.Type.PLANET,
+                -WORLD_WIDTH * 0.25f,
+                WORLD_HEIGHT * 0.5f,
+                40f,
+                "Planet"
+            ));
+            addOrbitTarget(new GameObject(
+                GameObject.Type.SPACE_STATION,
+                WORLD_WIDTH * 1.25f,
+                WORLD_HEIGHT * 0.5f,
+                50f,
+                "Space Station"
+            ));
+        }
+
+        ensureOrbitTargetsNonEmpty();
 
         if (shipTemplates.isEmpty()) {
             throw new IllegalStateException("No ship templates found under mods/. Add ship JSON files before playing.");
         }
         
-        // Create space ships
-        for (int i = 0; i < 6; i++) {
-            float x = MathUtils.random(100f, WORLD_WIDTH - 100f);
-            float y = MathUtils.random(100f, WORLD_HEIGHT - 100f);
-
-            GameObject orbitTarget = Math.random() > 0.5 ? planet : spaceStation;
-
+        for (int i = 0; i < 12; i++) {
+            GameObject orbitTarget = pickRandomOrbitTarget();
             ShipData template = shipTemplates.get(MathUtils.random(shipTemplates.size - 1));
             float shipRadius = shipRadiusFromShipData(template);
-
-            SpaceShip ship = new SpaceShip(
-                x,
-                y,
-                shipRadius,
-                "Ship " + (i + 1) + " (" + template.id + ")",
-                orbitTarget,
-                template.speed
-            );
-            ship.configureFromShipData(template);
-            ship.setHullSprite(createHullSprite(template));
-            ship.configureWeaponInstances(buildWeaponInstances(template));
-
-            spaceShips.add(ship);
-            gameObjects.add(ship);
-            GameUtils.addSpaceShip(ship);
+            spawnShipNearOrbitTarget(i, orbitTarget, template, shipRadius);
         }
+    }
+
+    private void addOrbitTarget(GameObject obj) {
+        gameObjects.add(obj);
+        orbitTargets.add(obj);
+    }
+
+    private GameObject pickRandomOrbitTarget() {
+        return orbitTargets.get(MathUtils.random(orbitTargets.size - 1));
+    }
+
+    private void spawnShipNearOrbitTarget(int index, GameObject orbitTarget, ShipData template, float shipRadius) {
+        float angleDeg = MathUtils.random(0f, 360f);
+        float minDist = orbitTarget.getSize() + shipRadius + SHIP_SPAWN_MIN_CLEARANCE;
+        float maxDist = minDist + SHIP_SPAWN_MAX_EXTRA_RADIUS;
+        float dist = MathUtils.random(minDist, maxDist);
+        float x = orbitTarget.getX() + MathUtils.cosDeg(angleDeg) * dist;
+        float y = orbitTarget.getY() + MathUtils.sinDeg(angleDeg) * dist;
+
+        SpaceShip ship = new SpaceShip(
+            x,
+            y,
+            shipRadius,
+            "Ship " + (index + 1) + " (" + template.id + ")",
+            orbitTarget,
+            template.speed
+        );
+        ship.configureFromShipData(template);
+        ship.setHullSprite(createHullSprite(template));
+        ship.configureWeaponInstances(buildWeaponInstances(template));
+
+        spaceShips.add(ship);
+        gameObjects.add(ship);
+        GameUtils.addSpaceShip(ship);
+    }
+
+    private void ensureOrbitTargetsNonEmpty() {
+        if (!orbitTargets.isEmpty()) {
+            return;
+        }
+        addOrbitTarget(new GameObject(
+            GameObject.Type.PLANET,
+            -WORLD_WIDTH * 0.25f,
+            WORLD_HEIGHT * 0.5f,
+            40f,
+            "Planet"
+        ));
+    }
+
+    private void loadBodiesFromStarSystem(StarSystemData systemLayout) {
+        orbitTargets.clear();
+
+        for (StarSystemBody body : systemLayout.bodies) {
+            body.normalize();
+            GameObject.Type type = body.type == StarSystemBody.Kind.SPACE_STATION
+                ? GameObject.Type.SPACE_STATION
+                : GameObject.Type.PLANET;
+            addOrbitTarget(new GameObject(type, body.x, body.y, body.size, body.name));
+        }
+
+        ensureOrbitTargetsNonEmpty();
+    }
+
+    private GameObject firstOrbitTargetOfType(GameObject.Type type) {
+        for (GameObject obj : orbitTargets) {
+            if (obj.getType() == type) {
+                return obj;
+            }
+        }
+        return null;
     }
 
     private Array<ShipWeaponInstance> buildWeaponInstances(ShipData data) {
@@ -566,11 +633,15 @@ public class GameWorld {
     }
 
     public GameObject getPlanet() {
-        return planet;
+        return firstOrbitTargetOfType(GameObject.Type.PLANET);
     }
     
     public GameObject getSpaceStation() {
-        return spaceStation;
+        return firstOrbitTargetOfType(GameObject.Type.SPACE_STATION);
+    }
+
+    public Array<GameObject> getOrbitTargets() {
+        return orbitTargets;
     }
     
     public void dispose() {
