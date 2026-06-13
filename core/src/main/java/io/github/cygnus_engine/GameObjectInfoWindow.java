@@ -26,7 +26,7 @@ public class GameObjectInfoWindow extends Window {
 
     public GameObjectInfoWindow(Skin skin, GameObject gameObject, Stage stage, Cargo playerCargo, int[] moneyRef,
                                 Runnable onClose) {
-        super("Game Object Info", skin, "border");
+        super("Hail", skin, "border");
         this.gameObject = gameObject;
         this.onClose = onClose;
 

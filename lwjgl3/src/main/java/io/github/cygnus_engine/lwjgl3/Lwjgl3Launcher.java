@@ -29,9 +29,7 @@ public class Lwjgl3Launcher {
         //// You may also need to configure GPU drivers to fully disable Vsync; this can cause screen tearing.
 
         configuration.setWindowedMode(1920, 1080);
-        //// You can change these files; they are in lwjgl3/src/main/resources/ .
-        //// They can also be loaded from the root of assets/ .
-        configuration.setWindowIcon("libgdx128.png", "libgdx64.png", "libgdx32.png", "libgdx16.png");
+        maybeSetWindowIcon(configuration);
 
         //// This could improve compatibility with Windows machines with buggy OpenGL drivers, Macs
         //// with Apple Silicon that have to emulate compatibility with OpenGL anyway, and more.
@@ -44,5 +42,22 @@ public class Lwjgl3Launcher {
 //        configuration.setOpenGLEmulation(Lwjgl3ApplicationConfiguration.GLEmulation.ANGLE_GLES20, 0, 0);
 
         return configuration;
+    }
+
+    /** Skip icons when IDE classpath omits processed resources (Gradle run still gets them). */
+    private static void maybeSetWindowIcon(Lwjgl3ApplicationConfiguration configuration) {
+        String[] iconFiles = {
+            "libgdx128.png",
+            "libgdx64.png",
+            "libgdx32.png",
+            "libgdx16.png",
+        };
+        ClassLoader loader = Lwjgl3Launcher.class.getClassLoader();
+        for (String iconFile : iconFiles) {
+            if (loader.getResource(iconFile) == null) {
+                return;
+            }
+        }
+        configuration.setWindowIcon(iconFiles);
     }
 }

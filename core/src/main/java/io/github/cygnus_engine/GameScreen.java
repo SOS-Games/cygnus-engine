@@ -1,12 +1,12 @@
 package io.github.cygnus_engine;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
-import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.Window;
@@ -24,11 +24,12 @@ public class GameScreen {
     private Cargo cargo;
     private int[] moneyRef = {1000};
     
-    private Window gameplayWindow;
+    private Window pauseMenuWindow;
     private CargoMenuScreen cargoMenuScreen;
     private GameObjectInfoWindow objectInfoWindow;
     private float savedInfoWindowX = Float.NaN;
     private float savedInfoWindowY = Float.NaN;
+    private final Vector3 mouseWorldScratch = new Vector3();
 
     public GameScreen(Stage stage, Skin skin, ScreenListener listener) {
         this.stage = stage;
@@ -38,50 +39,35 @@ public class GameScreen {
         // Initialize game world and cargo only when entering the game screen
         gameWorld = new GameWorld();
         cargo = new Cargo(false);
+        SpaceShip playerShip = gameWorld.getPlayerShip();
+        if (playerShip != null) {
+            playerShip.setCargo(cargo);
+        }
         
-        setupUI();
+        setupPauseMenu();
         setupInputHandling();
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
     }
 
-    private void setupUI() {
-        // Create exit button for gameplay
-        gameplayWindow = new Window("Gameplay", skin, "border");
-        gameplayWindow.defaults().pad(4f);
-        gameplayWindow.add("Welcome to the Trading Game").row();
+    private void setupPauseMenu() {
+        pauseMenuWindow = new Window("Paused", skin, "border");
+        pauseMenuWindow.defaults().pad(4f);
+        pauseMenuWindow.setMovable(true);
+        pauseMenuWindow.setVisible(false);
 
-        // Cargo menu button
-        TextButton cargoButton = new TextButton("View Cargo", skin);
-        cargoButton.pad(8f);
-        cargoButton.addListener(new ChangeListener() {
-            @Override
-            public void changed(final ChangeEvent event, final Actor actor) {
-                if (cargoMenuScreen == null) {
-                    cargoMenuScreen = new CargoMenuScreen(skin, cargo);
-                    UiWindowUtils.createAndCenterWindow(cargoMenuScreen, stage);
-                } else {
-                    cargoMenuScreen.refresh();
-                    cargoMenuScreen.setVisible(true);
-                }
-            }
-        });
-        gameplayWindow.add(cargoButton).row();
-
-        // Exit to menu button
-        TextButton exitButton = new TextButton("Exit to Menu", skin);
+        TextButton exitButton = new TextButton("Exit to Main Menu", skin);
         exitButton.pad(8f);
         exitButton.addListener(new ChangeListener() {
             @Override
             public void changed(final ChangeEvent event, final Actor actor) {
-                if (GameScreen.this.listener != null) {
-                    GameScreen.this.listener.onExitToMenu();
+                if (listener != null) {
+                    listener.onExitToMenu();
                 }
             }
         });
-        gameplayWindow.add(exitButton);
-        
-        gameplayWindow.addAction(Actions.sequence(Actions.alpha(0f), Actions.fadeIn(1f)));
-        UiWindowUtils.createAndCenterWindow(gameplayWindow, stage);
+        pauseMenuWindow.add(exitButton);
+        pauseMenuWindow.pack();
+        UiWindowUtils.createAndCenterWindow(pauseMenuWindow, stage);
     }
 
     private void setupInputHandling() {
@@ -92,25 +78,6 @@ public class GameScreen {
             public boolean scrolled(float amountX, float amountY) {
                 gameWorld.adjustZoom(amountY);
                 return true;
-            }
-
-            @Override
-            public boolean touchDown(int screenX, int screenY, int pointer, int button) {
-                float clientX = Gdx.graphics.getWidth();
-                float clientY = Gdx.graphics.getHeight();
-
-                Vector3 clickedPos = new Vector3(screenX, screenY, 0);
-                Vector3 unprojected = gameWorld.getCamera().unproject(clickedPos, 0.0f, 0.0f, clientX, clientY);
-
-                GameObject clickedObject = gameWorld.getObjectAt(unprojected.x, unprojected.y);
-                if (clickedObject != null) {
-                    gameWorld.setSelectedObject(clickedObject);
-                    showObjectInfo(clickedObject);
-                    return true;
-                }
-
-                gameWorld.setSelectedObject(null);
-                return false;
             }
         });
         Gdx.input.setInputProcessor(inputMultiplexer);
@@ -141,7 +108,179 @@ public class GameScreen {
     }
 
     public void update(float deltaTime) {
+        handleEscapeKey();
+        if (isPaused()) {
+            return;
+        }
+        updatePlayerInput();
+        handleGameplayHotkeys();
         gameWorld.update(deltaTime);
+    }
+
+    private boolean isPaused() {
+        return pauseMenuWindow != null && pauseMenuWindow.isVisible();
+    }
+
+    private void handleEscapeKey() {
+        if (!Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+            return;
+        }
+
+        Window topWindow = findTopmostVisibleWindow();
+        if (topWindow != null) {
+            closeWindow(topWindow);
+            return;
+        }
+
+        showPauseMenu();
+    }
+
+    /** Topmost visible window on the stage (last drawn). */
+    private Window findTopmostVisibleWindow() {
+        for (int i = stage.getActors().size - 1; i >= 0; i--) {
+            Actor actor = stage.getActors().get(i);
+            if (actor instanceof Window window && window.isVisible()) {
+                return window;
+            }
+        }
+        return null;
+    }
+
+    private void closeWindow(Window window) {
+        if (window == objectInfoWindow) {
+            rememberInfoWindowPosition();
+            objectInfoWindow.setVisible(false);
+            return;
+        }
+        if (window == cargoMenuScreen) {
+            cargoMenuScreen.setVisible(false);
+            return;
+        }
+        if (window == pauseMenuWindow) {
+            pauseMenuWindow.setVisible(false);
+            return;
+        }
+        window.remove();
+    }
+
+    private void showPauseMenu() {
+        pauseMenuWindow.setVisible(true);
+        pauseMenuWindow.toFront();
+        UiWindowUtils.createAndCenterWindow(pauseMenuWindow, stage);
+    }
+
+    private void handleGameplayHotkeys() {
+        if (Gdx.input.isKeyJustPressed(Input.Keys.H)) {
+            GameObject subject = resolveHailSubject();
+            if (subject != null) {
+                showObjectInfo(subject);
+            }
+        }
+        if (Gdx.input.isKeyJustPressed(Input.Keys.C)) {
+            showCargoMenu();
+        }
+    }
+
+    private void showCargoMenu() {
+        if (cargoMenuScreen == null) {
+            cargoMenuScreen = new CargoMenuScreen(skin, cargo);
+            UiWindowUtils.createAndCenterWindow(cargoMenuScreen, stage);
+        } else {
+            cargoMenuScreen.refresh();
+            cargoMenuScreen.setVisible(true);
+            cargoMenuScreen.toFront();
+            UiWindowUtils.createAndCenterWindow(cargoMenuScreen, stage);
+        }
+    }
+
+    /** Player lock, then ship/object under the cursor. */
+    private GameObject resolveHailSubject() {
+        SpaceShip player = gameWorld.getPlayerShip();
+        if (player != null) {
+            GameObject locked = player.getPlayerTarget();
+            if (locked != null) {
+                return locked;
+            }
+        }
+
+        if (stage.hit(Gdx.input.getX(), Gdx.input.getY(), true) != null) {
+            return null;
+        }
+
+        float clientW = Gdx.graphics.getWidth();
+        float clientH = Gdx.graphics.getHeight();
+        mouseWorldScratch.set(Gdx.input.getX(), Gdx.input.getY(), 0f);
+        gameWorld.getCamera().unproject(mouseWorldScratch, 0f, 0f, clientW, clientH);
+
+        GameObject underMouse = gameWorld.getObjectAt(mouseWorldScratch.x, mouseWorldScratch.y);
+        if (underMouse != null && underMouse != player) {
+            return underMouse;
+        }
+        return null;
+    }
+
+    private void updatePlayerInput() {
+        SpaceShip player = gameWorld.getPlayerShip();
+        if (player == null) {
+            return;
+        }
+
+        float clientW = Gdx.graphics.getWidth();
+        float clientH = Gdx.graphics.getHeight();
+        mouseWorldScratch.set(Gdx.input.getX(), Gdx.input.getY(), 0f);
+        gameWorld.getCamera().unproject(mouseWorldScratch, 0f, 0f, clientW, clientH);
+
+        float aimAngle = CustomMathUtils.getAngleBetweenPoints(
+            player.getX(),
+            player.getY(),
+            mouseWorldScratch.x,
+            mouseWorldScratch.y
+        );
+
+        float forward = 0f;
+        float strafe = 0f;
+        if (Gdx.input.isKeyPressed(Input.Keys.W)) {
+            forward += 1f;
+        }
+        if (Gdx.input.isKeyPressed(Input.Keys.S)) {
+            forward -= 1f;
+        }
+        if (Gdx.input.isKeyPressed(Input.Keys.A)) {
+            strafe += 1f;
+        }
+        if (Gdx.input.isKeyPressed(Input.Keys.D)) {
+            strafe -= 1f;
+        }
+
+        float inputLen = (float) Math.sqrt(forward * forward + strafe * strafe);
+        if (inputLen > 1e-4f) {
+            forward /= inputLen;
+            strafe /= inputLen;
+        }
+
+        player.applyPlayerInput(
+            aimAngle,
+            forward,
+            strafe,
+            mouseWorldScratch.x,
+            mouseWorldScratch.y
+        );
+
+        boolean overUi = stage.hit(Gdx.input.getX(), Gdx.input.getY(), true) != null;
+        GameObject hoverTarget = null;
+        if (!overUi) {
+            hoverTarget = gameWorld.getObjectAt(mouseWorldScratch.x, mouseWorldScratch.y);
+            if (hoverTarget == player) {
+                hoverTarget = null;
+            }
+            if (hoverTarget != null) {
+                player.setPlayerTarget(hoverTarget);
+            }
+        }
+        player.validatePlayerTarget();
+
+        boolean fireHeld = Gdx.input.isButtonPressed(Input.Buttons.LEFT) && !overUi;
+        player.setPlayerFireHeld(fireHeld);
     }
 
     public void render() {

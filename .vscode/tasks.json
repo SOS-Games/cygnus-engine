@@ -1,0 +1,15 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "gradle: lwjgl3 classes",
+            "type": "shell",
+            "command": ".\\gradlew.bat :lwjgl3:classes",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": []
+        }
+    ]
+}

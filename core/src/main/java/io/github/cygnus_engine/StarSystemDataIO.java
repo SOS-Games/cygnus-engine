@@ -46,7 +46,7 @@ public final class StarSystemDataIO {
 
     public static List<FileHandle> collectSystemJsonFiles() {
         List<FileHandle> out = new ArrayList<>();
-        FileHandle modsDir = Gdx.files.local("mods");
+        FileHandle modsDir = ModPaths.modsRoot();
         if (!modsDir.exists()) {
             return out;
         }

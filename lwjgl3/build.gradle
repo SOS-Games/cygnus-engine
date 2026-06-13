@@ -28,6 +28,10 @@ if (JavaVersion.current().isJava9Compatible()) {
         compileJava.options.release.set(21)
 }
 
+tasks.named('processResources', ProcessResources) {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
 dependencies {
   implementation "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
   implementation "com.badlogicgames.gdx:gdx-box2d-platform:$gdxVersion:natives-desktop"
@@ -46,7 +50,8 @@ dependencies {
 def os = System.properties['os.name'].toLowerCase(Locale.ROOT)
 
 run {
-  workingDir = rootProject.file('assets').path
+  // Repo root so Gdx.files.local("mods/...") resolves; UI still loads from classpath assets/.
+  workingDir = rootProject.projectDir
 // You can uncomment the next line if your IDE claims a build failure even when the app closed properly.
   //setIgnoreExitValue(true)
 

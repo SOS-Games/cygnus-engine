@@ -52,7 +52,7 @@ public final class WeaponDataIO {
     /** All weapon definitions, order stable by mod folder then file name. */
     public static List<WeaponData> listAllWeapons() {
         Map<String, WeaponData> byId = new LinkedHashMap<>();
-        FileHandle modsDir = Gdx.files.local("mods");
+        FileHandle modsDir = ModPaths.modsRoot();
 
         if (!modsDir.exists()) return new ArrayList<>(byId.values());
 
@@ -82,7 +82,7 @@ public final class WeaponDataIO {
     }
 
     public static FileHandle findWeaponJson(String weaponId) {
-        FileHandle modsDir = Gdx.files.local("mods");
+        FileHandle modsDir = ModPaths.modsRoot();
         if (!modsDir.exists()) return null;
         
         for (FileHandle modFolder : modsDir.list()) {
@@ -122,7 +122,7 @@ public final class WeaponDataIO {
     public static FileHandle resolveTextureFile(String texturePath) {
         if (texturePath == null || texturePath.isBlank()) return null;
         
-        FileHandle local = Gdx.files.local(texturePath);
+        FileHandle local = ModPaths.resolveLocal(texturePath);
         if (local.exists()) return local;
 
         FileHandle internal = Gdx.files.internal(texturePath);

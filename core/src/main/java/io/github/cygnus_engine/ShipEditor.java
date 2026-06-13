@@ -590,7 +590,7 @@ public class ShipEditor {
         if (shipData == null || shipData.texturePath == null || shipData.texturePath.isBlank()) {
             return null;
         }
-        FileHandle local = Gdx.files.local(shipData.texturePath);
+        FileHandle local = ModPaths.resolveLocal(shipData.texturePath);
         if (local.exists()) {
             return local;
         }

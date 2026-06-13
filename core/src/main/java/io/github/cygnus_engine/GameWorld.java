@@ -50,6 +50,7 @@ public class GameWorld {
     private int pirateSpawnCounter;
     private GameObject selectedObject;
     private SpaceShip cameraFollowTarget;
+    private SpaceShip playerShip;
     private float cameraZoom = 1f;
     private float worldPerPixelX = 1f;
     private float worldPerPixelY = 1f;
@@ -90,7 +91,7 @@ public class GameWorld {
     private void loadAllShipSprites() {
         shipDataById.clear();
         shipTemplates.clear();
-        FileHandle modsDir = Gdx.files.local("mods");
+        FileHandle modsDir = ModPaths.modsRoot();
         if (!modsDir.exists()) {
             return;
         }
@@ -170,6 +171,8 @@ public class GameWorld {
             boolean asTrader = MathUtils.random() < TRADER_SHIP_FRACTION && orbitTargets.size >= 2;
             spawnShipNearOrbitTarget(i, orbitTarget, template, shipRadius, asTrader);
         }
+
+        spawnPlayerShip();
     }
 
     private void addOrbitTarget(GameObject obj) {
@@ -216,6 +219,48 @@ public class GameWorld {
         spaceShips.add(ship);
         gameObjects.add(ship);
         GameUtils.addSpaceShip(ship);
+    }
+
+    private ShipData pickPlayerShipTemplate() {
+        ShipData fighter = shipDataById.get("fighter_2");
+        if (fighter != null) {
+            return fighter;
+        }
+        return shipTemplates.first();
+    }
+
+    private void spawnPlayerShip() {
+        ShipData template = pickPlayerShipTemplate();
+        GameObject anchor = pickRandomOrbitTarget();
+        float shipRadius = shipRadiusFromShipData(template);
+
+        float angleDeg = MathUtils.random(0f, 360f);
+        float minDist = anchor.getSize() + shipRadius + SHIP_SPAWN_MIN_CLEARANCE;
+        float maxDist = minDist + SHIP_SPAWN_MAX_EXTRA_RADIUS;
+        float dist = MathUtils.random(minDist, maxDist);
+        float x = anchor.getX() + MathUtils.cosDeg(angleDeg) * dist;
+        float y = anchor.getY() + MathUtils.sinDeg(angleDeg) * dist;
+
+        playerShip = new SpaceShip(
+            x,
+            y,
+            shipRadius,
+            "Player (" + template.id + ")",
+            anchor,
+            template.speed
+        );
+        playerShip.configureFromShipData(template);
+        playerShip.setHullSprite(createHullSprite(template));
+        playerShip.configureWeaponInstances(buildWeaponInstances(template));
+        playerShip.configureAsPlayer(anchor);
+
+        spaceShips.add(playerShip);
+        gameObjects.add(playerShip);
+        GameUtils.addSpaceShip(playerShip);
+    }
+
+    public SpaceShip getPlayerShip() {
+        return playerShip;
     }
 
     private void trySpawnPirateWarpIn() {
@@ -266,7 +311,7 @@ public class GameWorld {
         }
         for (int attempt = 0; attempt < spaceShips.size; attempt++) {
             SpaceShip ship = spaceShips.get(MathUtils.random(spaceShips.size - 1));
-            if (!ship.isPirate()) {
+            if (!ship.isPirate() && !ship.isPlayerControlled()) {
                 return ship;
             }
         }
@@ -337,7 +382,7 @@ public class GameWorld {
         Texture cached = shipTextureCache.get(shipData.id);
         if (cached != null) return cached;
 
-        FileHandle resolvedTexture = com.badlogic.gdx.Gdx.files.local(shipData.texturePath);
+        FileHandle resolvedTexture = ModPaths.resolveLocal(shipData.texturePath);
         if (!resolvedTexture.exists()) {
             resolvedTexture = com.badlogic.gdx.Gdx.files.internal("images/" + shipData.id + ".png");
         }
@@ -420,10 +465,10 @@ public class GameWorld {
     private void updateCamera(float deltaTime) {
         float targetX = DEFAULT_CAMERA_X;
         float targetY = DEFAULT_CAMERA_Y;
-        boolean followShip = cameraFollowTarget != null && selectedObject == cameraFollowTarget;
-        if (followShip) {
-            targetX = cameraFollowTarget.getX();
-            targetY = cameraFollowTarget.getY();
+        SpaceShip followTarget = getCameraFollowShip();
+        if (followTarget != null) {
+            targetX = followTarget.getX();
+            targetY = followTarget.getY();
             camera.position.x = targetX;
             camera.position.y = targetY;
         } else {
@@ -436,8 +481,18 @@ public class GameWorld {
         refreshCameraProjection();
     }
 
+    private SpaceShip getCameraFollowShip() {
+        if (playerShip != null) {
+            return playerShip;
+        }
+        if (cameraFollowTarget != null && selectedObject == cameraFollowTarget) {
+            return cameraFollowTarget;
+        }
+        return null;
+    }
+
     private boolean isFollowingShip() {
-        return cameraFollowTarget != null && selectedObject == cameraFollowTarget;
+        return getCameraFollowShip() != null;
     }
 
     private void updateWorldPerPixelScales() {
@@ -542,7 +597,7 @@ public class GameWorld {
         shapeRenderer.end();
 
         spriteBatch.begin();
-        SpaceShip pinnedShip = isFollowingShip() ? cameraFollowTarget : null;
+        SpaceShip pinnedShip = getCameraFollowShip();
         for (GameObject obj : gameObjects) {
             if (!(obj instanceof SpaceShip ship) || !ship.isVisible()) {
                 continue;
@@ -591,8 +646,44 @@ public class GameWorld {
 
         shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
         drawShipClickBoundsOutlines(pinnedShip);
+        drawPlayerTargetIndicator(pinnedShip);
         drawPinnedOrbitTargetIndicator();
         shapeRenderer.end();
+    }
+
+    private void drawPlayerTargetIndicator(SpaceShip pinnedShip) {
+        if (playerShip == null) {
+            return;
+        }
+        GameObject target = playerShip.getPlayerTarget();
+        if (target == null || !isIndicatorVisible(target)) {
+            return;
+        }
+        drawSelectionSquare(target, pinnedShip);
+    }
+
+    private void drawSelectionSquare(GameObject obj, SpaceShip pinnedShip) {
+        shapeRenderer.setColor(1f, 0.85f, 0.2f, 1f);
+
+        if (obj instanceof SpaceShip ship) {
+            float half = ship.getClickBoundsRadius() + SELECTION_RING_PADDING;
+            ship.writeClickBoundsWorldCenter(renderSnapScratch);
+            float cx = renderSnapScratch.x;
+            float cy = renderSnapScratch.y;
+            if (!(ship == pinnedShip && isFollowingShip())) {
+                snapWorldPoint(cx, cy, renderSnapScratch);
+                cx = renderSnapScratch.x;
+                cy = renderSnapScratch.y;
+            }
+            shapeRenderer.rect(cx - half, cy - half, half * 2f, half * 2f);
+            return;
+        }
+
+        float half = obj.getSize() * 0.5f + SELECTION_RING_PADDING;
+        snapWorldPoint(obj.getX(), obj.getY(), renderSnapScratch);
+        float cx = renderSnapScratch.x;
+        float cy = renderSnapScratch.y;
+        shapeRenderer.rect(cx - half, cy - half, half * 2f, half * 2f);
     }
 
     private void drawShipClickBoundsOutlines(SpaceShip pinnedShip) {
@@ -642,17 +733,18 @@ public class GameWorld {
 
     /** Short line from the camera-pinned ship toward its patrol orbit target (planet/station). */
     private void drawPinnedOrbitTargetIndicator() {
-        if (!isFollowingShip() || cameraFollowTarget == null) {
+        SpaceShip followShip = getCameraFollowShip();
+        if (followShip == null || followShip.isPlayerControlled()) {
             return;
         }
 
-        GameObject orbitTarget = cameraFollowTarget.getOrbitTarget();
+        GameObject orbitTarget = followShip.getOrbitTarget();
         if (orbitTarget == null) {
             return;
         }
 
-        float sx = cameraFollowTarget.getX();
-        float sy = cameraFollowTarget.getY();
+        float sx = followShip.getX();
+        float sy = followShip.getY();
         float dx = orbitTarget.getX() - sx;
         float dy = orbitTarget.getY() - sy;
         float distance = (float) Math.sqrt(dx * dx + dy * dy);

@@ -86,7 +86,7 @@ public class SpaceShip extends GameObject {
     /** Forward/strafe acceleration in units/s² = fraction × reference speed (max or active target). */
     private static final float ACCELERATION_FRACTION_OF_MAX_SPEED = 0.75f;
     /** During combat, ships may roam up to this multiple of {@link #maxDistanceFromOrbitTarget}. */
-    private static final float COMBAT_ORBIT_LEASH_MULTIPLIER = 2f;
+    private static final float COMBAT_ORBIT_LEASH_MULTIPLIER = 3f;
 
     private float combatAimToleranceDegrees = 12f;
     private float velocityX = 0f;
@@ -127,6 +127,13 @@ public class SpaceShip extends GameObject {
     private boolean trader = false;
     private boolean militiaPatrol = false;
     private boolean pirate = false;
+    private boolean playerControlled = false;
+    private float playerForwardInput = 0f;
+    private float playerStrafeInput = 0f;
+    private float playerAimWorldX = 0f;
+    private float playerAimWorldY = 0f;
+    private boolean playerFireHeld = false;
+    private GameObject playerTarget = null;
     private final Array<GameObject> tradeRoute = new Array<>();
     private final Array<GameObject> patrolAnchors = new Array<>();
     private GameObject tradeDestination;
@@ -143,6 +150,7 @@ public class SpaceShip extends GameObject {
     private final Array<Vector2> engineLocalPositions = new Array<>();
     private final Affine2 worldTransform = new Affine2();
     private final Vector2 collisionScratch = new Vector2();
+    private final Vector2 aimScratch = new Vector2();
     private Sprite hullSprite;
 
     public enum Behavior {
@@ -151,6 +159,7 @@ public class SpaceShip extends GameObject {
         TRADER_TRANSIT,
         TRADER_DOCKED,
         MILITIA_TRANSIT,
+        PLAYER_CONTROLLED,
         WARPING_OUT,
         WARPED_OUT,
         WARPING_IN,
@@ -252,6 +261,7 @@ public class SpaceShip extends GameObject {
         trader = true;
         militiaPatrol = false;
         pirate = false;
+        playerControlled = false;
         tradeRoute.clear();
         if (stops != null) {
             tradeRoute.addAll(stops);
@@ -266,6 +276,7 @@ public class SpaceShip extends GameObject {
         trader = false;
         militiaPatrol = true;
         pirate = false;
+        playerControlled = false;
         patrolAnchors.clear();
         if (anchors != null) {
             patrolAnchors.addAll(anchors);
@@ -280,10 +291,80 @@ public class SpaceShip extends GameObject {
         trader = false;
         militiaPatrol = false;
         pirate = true;
+        playerControlled = false;
         if (anchor != null) {
             orbitTarget = anchor;
         }
         combatTarget = null;
+    }
+
+    public void configureAsPlayer(GameObject anchor) {
+        trader = false;
+        militiaPatrol = false;
+        pirate = false;
+        playerControlled = true;
+        if (anchor != null) {
+            orbitTarget = anchor;
+        }
+        combatTarget = null;
+        currentBehavior = Behavior.PLAYER_CONTROLLED;
+    }
+
+    public boolean isPlayerControlled() {
+        return playerControlled;
+    }
+
+    /** Hull aim (deg), normalized forward/strafe axes in [-1, 1], and mouse world position for turrets. */
+    public void applyPlayerInput(
+        float aimAngleDeg,
+        float forwardAxis,
+        float strafeAxis,
+        float aimWorldX,
+        float aimWorldY
+    ) {
+        if (!playerControlled) {
+            return;
+        }
+        targetAngle = CustomMathUtils.normalizeAngle360(aimAngleDeg);
+        playerForwardInput = MathUtils.clamp(forwardAxis, -1f, 1f);
+        playerStrafeInput = MathUtils.clamp(strafeAxis, -1f, 1f);
+        playerAimWorldX = aimWorldX;
+        playerAimWorldY = aimWorldY;
+    }
+
+    public void setPlayerFireHeld(boolean fireHeld) {
+        if (playerControlled) {
+            playerFireHeld = fireHeld;
+        }
+    }
+
+    /** Hover-selected target for player UI and homing weapons (not AI {@link #combatTarget}). */
+    public void setPlayerTarget(GameObject target) {
+        if (!playerControlled) {
+            return;
+        }
+        if (target == this) {
+            playerTarget = null;
+            return;
+        }
+        playerTarget = target;
+    }
+
+    public GameObject getPlayerTarget() {
+        return playerTarget;
+    }
+
+    /** Drop the lock when the target is destroyed, warps out, or otherwise gone. */
+    public void validatePlayerTarget() {
+        if (playerTarget == null || playerTarget == this) {
+            playerTarget = null;
+            return;
+        }
+        if (playerTarget instanceof SpaceShip targetShip) {
+            if (!targetShip.isVisible() || !GameUtils.isRegisteredShip(targetShip)) {
+                playerTarget = null;
+            }
+        }
     }
 
     public boolean isTrader() {
@@ -486,6 +567,9 @@ public class SpaceShip extends GameObject {
                 updateMilitiaTransit();
                 updatePatrolOrCombat(deltaTime, projectileManager, null);
                 break;
+            case PLAYER_CONTROLLED:
+                updatePlayerControl(deltaTime, projectileManager);
+                break;
             case FLYING_AROUND_TARGET:
             case FLYING_TO_TARGET:
                 updatePatrolOrCombat(deltaTime, projectileManager, () -> {
@@ -503,25 +587,106 @@ public class SpaceShip extends GameObject {
         refreshWorldTransformAndMountCaches();
     }
 
+    private void updatePlayerControl(float deltaTime, ProjectileManager projectileManager) {
+        targetForwardSpeed = maxNormalSpeed * playerForwardInput;
+        targetStrafeSpeed = maxNormalSpeed * playerStrafeInput;
+        updatePlayerWeaponAiming(deltaTime);
+        if (playerFireHeld) {
+            tryFireAtAimPoint(projectileManager);
+        }
+    }
+
+    private void updatePlayerWeaponAiming(float deltaTime) {
+        boolean homingTargetActive = isValidPlayerHomingTarget(playerTarget);
+
+        for (ShipWeaponInstance w : weaponInstances) {
+            if (w.data == null) {
+                continue;
+            }
+            w.fireCooldown = Math.max(0f, w.fireCooldown - deltaTime);
+
+            float aimWorldX = playerAimWorldX;
+            float aimWorldY = playerAimWorldY;
+            if (w.data.homing && homingTargetActive) {
+                writeLeadInterceptPoint(playerTarget, w, aimScratch);
+                aimWorldX = aimScratch.x;
+                aimWorldY = aimScratch.y;
+            }
+
+            if (w.slot.type == WeaponSlot.SlotType.TURRET) {
+                float wx = w.worldPosCache.x;
+                float wy = w.worldPosCache.y;
+                float desired = CustomMathUtils.getAngleBetweenPoints(wx, wy, aimWorldX, aimWorldY);
+                w.aimAngleDeg = rotateTowardDeg(w.aimAngleDeg, desired, w.data.turnRateDegPerSec * deltaTime);
+            } else {
+                w.aimAngleDeg = getRotation();
+            }
+        }
+    }
+
+    private boolean isValidPlayerHomingTarget(GameObject target) {
+        if (target == null || !(target instanceof SpaceShip targetShip)) {
+            return false;
+        }
+        if (targetShip == this || !targetShip.isVisible()) {
+            return false;
+        }
+        return GameUtils.isRegisteredShip(targetShip);
+    }
+
+    private void writeLeadInterceptPoint(GameObject target, ShipWeaponInstance w, Vector2 out) {
+        out.set(target.getX(), target.getY());
+        if (target instanceof SpaceShip targetShip && w.data != null) {
+            float ddx = target.getX() - getX();
+            float ddy = target.getY() - getY();
+            float dist = (float) Math.sqrt(ddx * ddx + ddy * ddy);
+            float travel = dist / Math.max(1f, w.data.projectileSpeed);
+            out.x += targetShip.getVelocityX() * travel;
+            out.y += targetShip.getVelocityY() * travel;
+        }
+    }
+
+    private float weaponAimAngleToward(ShipWeaponInstance w, float worldX, float worldY) {
+        return CustomMathUtils.getAngleBetweenPoints(
+            w.worldPosCache.x,
+            w.worldPosCache.y,
+            worldX,
+            worldY
+        );
+    }
+
     private void updateWeaponAiming(float deltaTime, GameObject target) {
+        if (target == null) {
+            for (ShipWeaponInstance w : weaponInstances) {
+                if (w.data == null) continue;
+                w.fireCooldown = Math.max(0f, w.fireCooldown - deltaTime);
+                w.aimAngleDeg = getRotation();
+            }
+            return;
+        }
+
+        float interceptX = target.getX();
+        float interceptY = target.getY();
+        if (target instanceof SpaceShip ts) {
+            float ddx = target.getX() - getX();
+            float ddy = target.getY() - getY();
+            float dist = (float) Math.sqrt(ddx * ddx + ddy * ddy);
+            float travel = dist / Math.max(1f, representativeProjectileSpeed());
+            interceptX += ts.getVelocityX() * travel;
+            interceptY += ts.getVelocityY() * travel;
+        }
+        updateWeaponAimingAtWorldPoint(deltaTime, interceptX, interceptY);
+    }
+
+    private void updateWeaponAimingAtWorldPoint(float deltaTime, float worldX, float worldY) {
         for (ShipWeaponInstance w : weaponInstances) {
             if (w.data == null) continue;
             w.fireCooldown = Math.max(0f, w.fireCooldown - deltaTime);
 
-            if (w.slot.type == WeaponSlot.SlotType.TURRET && target != null) {
+            if (w.slot.type == WeaponSlot.SlotType.TURRET) {
                 float wx = w.worldPosCache.x;
                 float wy = w.worldPosCache.y;
-                float interceptX = target.getX();
-                float interceptY = target.getY();
-                if (target instanceof SpaceShip ts) {
-                    float ddx = target.getX() - getX();
-                    float ddy = target.getY() - getY();
-                    float dist = (float) Math.sqrt(ddx * ddx + ddy * ddy);
-                    float travel = dist / Math.max(1f, w.data.projectileSpeed);
-                    interceptX += ts.getVelocityX() * travel;
-                    interceptY += ts.getVelocityY() * travel;
-                }
-                float desired = CustomMathUtils.getAngleBetweenPoints(wx, wy, interceptX, interceptY);
+                float desired = CustomMathUtils.getAngleBetweenPoints(wx, wy, worldX, worldY);
                 w.aimAngleDeg = rotateTowardDeg(w.aimAngleDeg, desired, w.data.turnRateDegPerSec * deltaTime);
             } else {
                 w.aimAngleDeg = getRotation();
@@ -551,36 +716,79 @@ public class SpaceShip extends GameObject {
             float aimDiff = Math.abs(CustomMathUtils.deltaDeg(w.aimAngleDeg, aimAngleForIntercept(w)));
             if (aimDiff > aimTolerance) continue;
 
-            float cos = MathUtils.cosDeg(w.aimAngleDeg);
-            float sin = MathUtils.sinDeg(w.aimAngleDeg);
-            float back = w.data.projectileRadius + 2f;
-            float spawnX = w.worldPosCache.x + cos * back;
-            float spawnY = w.worldPosCache.y + sin * back;
-
-            if (homing) {
-                projectileManager.spawn(
-                    this,
-                    spawnX,
-                    spawnY,
-                    w.aimAngleDeg,
-                    w.data.projectileSpeed,
-                    w.data.projectileLifetime,
-                    w.data.projectileRadius,
-                    combatTarget,
-                    w.data.homingTurnRateDegPerSec
-                );
-            } else {
-                projectileManager.spawn(
-                    this,
-                    spawnX,
-                    spawnY,
-                    w.aimAngleDeg,
-                    w.data.projectileSpeed,
-                    w.data.projectileLifetime,
-                    w.data.projectileRadius
-                );
-            }
+            spawnWeaponProjectile(projectileManager, w, homing ? combatTarget : null);
             w.fireCooldown = w.data.fireInterval;
+        }
+    }
+
+    private void tryFireAtAimPoint(ProjectileManager projectileManager) {
+        if (projectileManager == null || weaponInstances.size == 0) {
+            return;
+        }
+
+        boolean homingTargetActive = isValidPlayerHomingTarget(playerTarget);
+
+        for (ShipWeaponInstance w : weaponInstances) {
+            if (w.data == null || w.fireCooldown > 0f) {
+                continue;
+            }
+
+            GameObject homingTarget = w.data.homing && homingTargetActive ? playerTarget : null;
+            float aimWorldX = playerAimWorldX;
+            float aimWorldY = playerAimWorldY;
+            if (homingTarget != null) {
+                writeLeadInterceptPoint(homingTarget, w, aimScratch);
+                aimWorldX = aimScratch.x;
+                aimWorldY = aimScratch.y;
+            }
+
+            float aimTolerance = w.data.homing && homingTarget != null ? 55f : combatAimToleranceDegrees;
+            float aimDiff = Math.abs(CustomMathUtils.deltaDeg(
+                w.aimAngleDeg,
+                weaponAimAngleToward(w, aimWorldX, aimWorldY)
+            ));
+            if (aimDiff > aimTolerance) {
+                continue;
+            }
+
+            spawnWeaponProjectile(projectileManager, w, homingTarget);
+            w.fireCooldown = w.data.fireInterval;
+        }
+    }
+
+    private void spawnWeaponProjectile(
+        ProjectileManager projectileManager,
+        ShipWeaponInstance w,
+        GameObject homingTarget
+    ) {
+        float cos = MathUtils.cosDeg(w.aimAngleDeg);
+        float sin = MathUtils.sinDeg(w.aimAngleDeg);
+        float back = w.data.projectileRadius + 2f;
+        float spawnX = w.worldPosCache.x + cos * back;
+        float spawnY = w.worldPosCache.y + sin * back;
+
+        if (w.data.homing && homingTarget != null) {
+            projectileManager.spawn(
+                this,
+                spawnX,
+                spawnY,
+                w.aimAngleDeg,
+                w.data.projectileSpeed,
+                w.data.projectileLifetime,
+                w.data.projectileRadius,
+                homingTarget,
+                w.data.homingTurnRateDegPerSec
+            );
+        } else {
+            projectileManager.spawn(
+                this,
+                spawnX,
+                spawnY,
+                w.aimAngleDeg,
+                w.data.projectileSpeed,
+                w.data.projectileLifetime,
+                w.data.projectileRadius
+            );
         }
     }
 
@@ -1272,6 +1480,12 @@ public class SpaceShip extends GameObject {
     
     public Cargo getCargo() {
         return cargo;
+    }
+
+    public void setCargo(Cargo cargo) {
+        if (cargo != null) {
+            this.cargo = cargo;
+        }
     }
 
     public float getVelocityX() {

@@ -239,7 +239,7 @@ public class ModdingScreen {
 
     private static ArrayList<FileHandle> collectShipJsonFiles() {
         ArrayList<FileHandle> out = new ArrayList<>();
-        FileHandle modsDir = Gdx.files.local("mods");
+        FileHandle modsDir = ModPaths.modsRoot();
         if (!modsDir.exists()) {
             return out;
         }
@@ -265,7 +265,7 @@ public class ModdingScreen {
 
     private static ArrayList<FileHandle> collectWeaponJsonFiles() {
         ArrayList<FileHandle> out = new ArrayList<>();
-        FileHandle modsDir = Gdx.files.local("mods");
+        FileHandle modsDir = ModPaths.modsRoot();
         if (!modsDir.exists()) {
             return out;
         }
@@ -303,7 +303,7 @@ public class ModdingScreen {
             String texPath = peek != null ? peek.texturePath : "";
             boolean imageOk = false;
             if (texPath != null && !texPath.isBlank()) {
-                FileHandle t = Gdx.files.local(texPath);
+                FileHandle t = ModPaths.resolveLocal(texPath);
                 imageOk = t.exists() || Gdx.files.internal(texPath).exists();
             }
 
@@ -827,7 +827,7 @@ public class ModdingScreen {
     }
 
     private void openCreateSystemDialog() {
-        FileHandle systemsDir = Gdx.files.local("mods/core/systems");
+        FileHandle systemsDir = ModPaths.resolveLocal("mods/core/systems");
         systemsDir.mkdirs();
 
         Dialog dialog = new Dialog("Create star system", skin, "dialog") {
@@ -947,7 +947,7 @@ public class ModdingScreen {
 
     private static ArrayList<FileHandle> collectTexturePngFiles() {
         ArrayList<FileHandle> out = new ArrayList<>();
-        FileHandle modsDir = Gdx.files.local("mods");
+        FileHandle modsDir = ModPaths.modsRoot();
         if (!modsDir.exists()) {
             return out;
         }
@@ -976,7 +976,7 @@ public class ModdingScreen {
     }
 
     private void openCreateShipDialog() {
-        FileHandle defaultMod = Gdx.files.local("mods/core");
+        FileHandle defaultMod = ModPaths.resolveLocal("mods/core");
         defaultMod.mkdirs();
 
         Dialog dialog = new Dialog("Create ship", skin, "dialog") {
@@ -1043,7 +1043,7 @@ public class ModdingScreen {
     }
 
     private void openCreateWeaponDialog() {
-        FileHandle weaponsDir = Gdx.files.local("mods/core/weapons");
+        FileHandle weaponsDir = ModPaths.resolveLocal("mods/core/weapons");
         weaponsDir.mkdirs();
 
         Dialog dialog = new Dialog("Create weapon", skin, "dialog") {
