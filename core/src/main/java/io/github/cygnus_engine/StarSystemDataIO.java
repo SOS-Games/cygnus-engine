@@ -128,6 +128,16 @@ public final class StarSystemDataIO {
         civilianStation.size = 50f;
         data.bodies.add(civilianStation);
 
+        StarSystemAsteroidBelt belt = new StarSystemAsteroidBelt();
+        belt.name = "Inner Belt";
+        belt.x = data.worldWidth * 0.5f;
+        belt.y = data.worldHeight * 0.5f;
+        belt.width = data.worldWidth * 0.65f;
+        belt.height = data.worldHeight * 0.4f;
+        belt.beltThickness = 45f;
+        belt.asteroidCount = 80;
+        data.asteroidBelts.add(belt);
+
         data.normalize();
         return data;
     }

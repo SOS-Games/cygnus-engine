@@ -9,6 +9,7 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.Array;
 
 public class StarSystemEditor {
 
@@ -31,9 +32,12 @@ public class StarSystemEditor {
     private StarSystemData systemData;
     private StarSystemBody selectedBody;
     private StarSystemBody hoveredBody;
+    private StarSystemAsteroidBelt selectedBelt;
+    private StarSystemAsteroidBelt hoveredBelt;
     private boolean dragging;
+    private final Vector2 dragGrabOffset = new Vector2();
 
-    public enum SelectionKind { NONE, PLANET, STATION }
+    public enum SelectionKind { NONE, PLANET, STATION, BELT }
 
     private SelectionKind selectionKind = SelectionKind.NONE;
 
@@ -45,10 +49,17 @@ public class StarSystemEditor {
             }
 
             Vector2 world = screenToWorld(screenX, screenY);
-            StarSystemBody hit = pickBody(world.x, world.y);
-            if (hit != null) {
-                selectBody(hit);
-                dragging = true;
+            StarSystemBody bodyHit = pickBody(world.x, world.y);
+            if (bodyHit != null) {
+                selectBody(bodyHit);
+                beginDrag(world.x, world.y, bodyHit.x, bodyHit.y);
+                return true;
+            }
+
+            StarSystemAsteroidBelt beltHit = pickBelt(world.x, world.y);
+            if (beltHit != null) {
+                selectBelt(beltHit);
+                beginDrag(world.x, world.y, beltHit.x, beltHit.y);
                 return true;
             }
 
@@ -58,15 +69,26 @@ public class StarSystemEditor {
 
         @Override
         public boolean touchDragged(int screenX, int screenY, int pointer) {
-            if (!dragging || selectedBody == null || systemData == null) {
+            if (!dragging || systemData == null) {
                 return false;
             }
 
             Vector2 world = screenToWorld(screenX, screenY);
             snap(world);
-            selectedBody.x = world.x;
-            selectedBody.y = world.y;
-            return true;
+            float x = world.x - dragGrabOffset.x;
+            float y = world.y - dragGrabOffset.y;
+            snapPosition(x, y, tmp);
+            if (selectedBody != null) {
+                selectedBody.x = tmp.x;
+                selectedBody.y = tmp.y;
+                return true;
+            }
+            if (selectedBelt != null) {
+                selectedBelt.x = tmp.x;
+                selectedBelt.y = tmp.y;
+                return true;
+            }
+            return false;
         }
 
         @Override
@@ -133,6 +155,10 @@ public class StarSystemEditor {
         );
     }
 
+    public boolean isDraggingSelection() {
+        return dragging;
+    }
+
     public StarSystemData getSystemData() {
         return systemData;
     }
@@ -141,19 +167,30 @@ public class StarSystemEditor {
         return selectedBody;
     }
 
+    public StarSystemAsteroidBelt getSelectedAsteroidBelt() {
+        return selectedBelt;
+    }
+
     public SelectionKind getSelectionKind() {
         return selectionKind;
     }
 
     public void clearSelection() {
         selectedBody = null;
+        selectedBelt = null;
         selectionKind = SelectionKind.NONE;
         dragging = false;
     }
 
     public String getSelectionSummary() {
+        if (selectedBelt != null) {
+            return "ASTEROID_BELT \"" + selectedBelt.name + "\" at ("
+                + (int) selectedBelt.x + ", " + (int) selectedBelt.y + ") "
+                + (int) selectedBelt.width + "×" + (int) selectedBelt.height
+                + " thick " + (int) selectedBelt.beltThickness;
+        }
         if (selectedBody == null || selectionKind == SelectionKind.NONE) {
-            return "Click a planet or station to select it.";
+            return "Click a planet, station, or asteroid belt to select it.";
         }
         return selectedBody.type + " \"" + selectedBody.name + "\" at ("
             + (int) selectedBody.x + ", " + (int) selectedBody.y + ") size "
@@ -192,6 +229,33 @@ public class StarSystemEditor {
         selectBody(body);
     }
 
+    public void addAsteroidBelt() {
+        if (systemData == null) {
+            return;
+        }
+        StarSystemAsteroidBelt belt = new StarSystemAsteroidBelt();
+        belt.name = "Belt " + nextBeltIndex();
+        belt.x = mapCenter.x;
+        belt.y = mapCenter.y;
+        belt.width = 420f;
+        belt.height = 240f;
+        belt.beltThickness = 40f;
+        belt.asteroidCount = 80;
+        if (systemData.asteroidBelts == null) {
+            systemData.asteroidBelts = new java.util.ArrayList<>();
+        }
+        systemData.asteroidBelts.add(belt);
+        selectBelt(belt);
+    }
+
+    private int nextBeltIndex() {
+        int n = 1;
+        if (systemData.asteroidBelts != null) {
+            n += systemData.asteroidBelts.size();
+        }
+        return n;
+    }
+
     private int nextIndex(StarSystemBody.Kind kind) {
         int n = 1;
         for (StarSystemBody b : systemData.bodies) {
@@ -203,7 +267,15 @@ public class StarSystemEditor {
     }
 
     public boolean deleteSelected() {
-        if (systemData == null || selectedBody == null) {
+        if (systemData == null) {
+            return false;
+        }
+        if (selectedBelt != null && systemData.asteroidBelts != null) {
+            systemData.asteroidBelts.remove(selectedBelt);
+            clearSelection();
+            return true;
+        }
+        if (selectedBody == null) {
             return false;
         }
         systemData.bodies.remove(selectedBody);
@@ -213,9 +285,16 @@ public class StarSystemEditor {
 
     private void selectBody(StarSystemBody body) {
         selectedBody = body;
+        selectedBelt = null;
         selectionKind = body.type == StarSystemBody.Kind.SPACE_STATION
             ? SelectionKind.STATION
             : SelectionKind.PLANET;
+    }
+
+    private void selectBelt(StarSystemAsteroidBelt belt) {
+        selectedBelt = belt;
+        selectedBody = null;
+        selectionKind = SelectionKind.BELT;
     }
 
     private StarSystemBody pickBody(float wx, float wy) {
@@ -240,12 +319,31 @@ public class StarSystemEditor {
         return null;
     }
 
+    private StarSystemAsteroidBelt pickBelt(float wx, float wy) {
+        if (systemData == null || systemData.asteroidBelts == null) {
+            return null;
+        }
+        float pickPad = HANDLE_PAD * zoomFactor();
+        for (int i = systemData.asteroidBelts.size() - 1; i >= 0; i--) {
+            StarSystemAsteroidBelt belt = systemData.asteroidBelts.get(i);
+            belt.normalize();
+            float r = AsteroidBeltGenerator.normalizedEllipseRadius(wx, wy, belt);
+            float avgRadius = (belt.semiMajorAxis() + belt.semiMinorAxis()) * 0.5f;
+            float halfBand = belt.beltThickness * 0.5f / Math.max(1f, avgRadius);
+            if (Math.abs(r - 1f) <= halfBand + pickPad / Math.max(1f, avgRadius)) {
+                return belt;
+            }
+        }
+        return null;
+    }
+
     private void updateHover(int screenX, int screenY) {
         if (dragging) {
             return;
         }
         Vector2 world = screenToWorld(screenX, screenY);
         hoveredBody = pickBody(world.x, world.y);
+        hoveredBelt = hoveredBody == null ? pickBelt(world.x, world.y) : null;
     }
 
     private Vector2 screenToWorld(int screenX, int screenY) {
@@ -261,6 +359,16 @@ public class StarSystemEditor {
     private void snap(Vector2 v) {
         v.x = Math.round(v.x / GRID_SIZE) * GRID_SIZE;
         v.y = Math.round(v.y / GRID_SIZE) * GRID_SIZE;
+    }
+
+    private void snapPosition(float x, float y, Vector2 out) {
+        out.x = Math.round(x / GRID_SIZE) * GRID_SIZE;
+        out.y = Math.round(y / GRID_SIZE) * GRID_SIZE;
+    }
+
+    private void beginDrag(float worldX, float worldY, float targetX, float targetY) {
+        dragGrabOffset.set(worldX - targetX, worldY - targetY);
+        dragging = true;
     }
 
     private float zoomFactor() {
@@ -292,6 +400,11 @@ public class StarSystemEditor {
                 shapeRenderer.rect(body.x - half, body.y - half, half * 2f, half * 2f);
             }
         }
+        if (systemData.asteroidBelts != null) {
+            for (StarSystemAsteroidBelt belt : systemData.asteroidBelts) {
+                drawBeltPreview(belt, belt == selectedBelt, belt == hoveredBelt && !dragging);
+            }
+        }
         shapeRenderer.end();
 
         shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
@@ -309,7 +422,47 @@ public class StarSystemEditor {
                 );
             }
         }
+        if (selectedBelt != null) {
+            drawBeltGuides(selectedBelt, Color.WHITE);
+        }
         shapeRenderer.end();
+    }
+
+    private void drawBeltPreview(StarSystemAsteroidBelt belt, boolean selected, boolean hovered) {
+        belt.normalize();
+        Array<GameObject> preview = new Array<>();
+        AsteroidBeltGenerator.populate(belt, preview);
+        float alpha = selected ? 1f : (hovered ? 0.95f : 0.75f);
+        shapeRenderer.setColor(1f, 1f, 1f, alpha);
+        for (GameObject asteroid : preview) {
+            shapeRenderer.circle(asteroid.getX(), asteroid.getY(), asteroid.getSize());
+        }
+    }
+
+    private void drawBeltGuides(StarSystemAsteroidBelt belt, Color color) {
+        belt.normalize();
+        shapeRenderer.setColor(color);
+        float cx = belt.x;
+        float cy = belt.y;
+        float a = belt.semiMajorAxis();
+        float b = belt.semiMinorAxis();
+        float halfT = belt.beltThickness * 0.5f;
+        drawEllipseOutline(cx, cy, Math.max(4f, a - halfT), Math.max(4f, b - halfT));
+        drawEllipseOutline(cx, cy, a + halfT, b + halfT);
+    }
+
+    private void drawEllipseOutline(float cx, float cy, float a, float b) {
+        int segments = 48;
+        float prevX = cx + a;
+        float prevY = cy;
+        for (int i = 1; i <= segments; i++) {
+            float t = i / (float) segments * MathUtils.PI2;
+            float x = cx + a * MathUtils.cos(t);
+            float y = cy + b * MathUtils.sin(t);
+            shapeRenderer.line(prevX, prevY, x, y);
+            prevX = x;
+            prevY = y;
+        }
     }
 
     private void drawGrid() {

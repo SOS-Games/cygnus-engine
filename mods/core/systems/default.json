@@ -3,9 +3,10 @@
 "name": "Default System",
 "bodies": [
 	{
-		"name": "Planet",
-		"x": -200,
-		"y": 760
+		"name": "Asteroid Belt",
+		"x": -220,
+		"y": 740,
+		"size": 50
 	},
 	{
 		"type": "SPACE_STATION",
@@ -16,10 +17,8 @@
 	},
 	{
 		"type": "SPACE_STATION",
-		"stationKind": "MILITIA",
-		"name": "Militia Outpost",
-		"x": 20,
-		"y": 780,
+		"name": "Asteroid Belt",
+		"y": 840,
 		"size": 50
 	},
 	{
@@ -29,6 +28,16 @@
 		"x": 160,
 		"y": -180,
 		"size": 50
+	}
+],
+"asteroidBelts": [
+	{
+		"x": 400,
+		"y": 320,
+		"width": 1000,
+		"height": 500,
+		"beltThickness": 100,
+		"asteroidCount": 300
 	}
 ]
 }

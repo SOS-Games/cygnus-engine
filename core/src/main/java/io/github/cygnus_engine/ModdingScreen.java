@@ -79,6 +79,19 @@ public class ModdingScreen {
     private TextField bodyYField;
     private TextField bodySizeField;
     private SelectBox<StationKind> bodyStationKindSelect;
+    private TextField beltWidthField;
+    private TextField beltHeightField;
+    private TextField beltThicknessField;
+    private TextField beltCountField;
+    private Label beltWidthLabel;
+    private Label beltHeightLabel;
+    private Label beltThicknessLabel;
+    private Label beltCountLabel;
+    private Label bodySizeLabel;
+    private Label bodyStationKindLabel;
+    private StarSystemBody lastSyncedSystemBody;
+    private StarSystemAsteroidBelt lastSyncedSystemBelt;
+    private boolean wasDraggingSystemSelection;
 
     private Texture weaponPreviewTexture;
     private Image weaponPreviewImage;
@@ -646,6 +659,8 @@ public class ModdingScreen {
         }
 
         starSystemEditor.loadFromDefinition(jsonFile);
+        lastSyncedSystemBody = null;
+        lastSyncedSystemBelt = null;
         buildSystemEditorUI();
         setupInput();
     }
@@ -705,6 +720,15 @@ public class ModdingScreen {
             }
         });
 
+        TextButton addBeltButton = new TextButton("Add belt", skin);
+        addBeltButton.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                starSystemEditor.addAsteroidBelt();
+                refreshSystemSelectionUI();
+            }
+        });
+
         TextButton deleteButton = new TextButton("Delete selected", skin);
         deleteButton.addListener(new ChangeListener() {
             @Override
@@ -727,6 +751,7 @@ public class ModdingScreen {
         systemEditorTopBar.add(backButton).padRight(6f);
         systemEditorTopBar.add(addPlanetButton).padRight(6f);
         systemEditorTopBar.add(addStationButton).padRight(6f);
+        systemEditorTopBar.add(addBeltButton).padRight(6f);
         systemEditorTopBar.add(deleteButton).padRight(6f);
         systemEditorTopBar.add(saveButton).padRight(6f).row();
 
@@ -745,6 +770,10 @@ public class ModdingScreen {
         bodySizeField = new TextField("", skin);
         bodyStationKindSelect = new SelectBox<>(skin);
         bodyStationKindSelect.setItems(StationKind.values());
+        beltWidthField = new TextField("", skin);
+        beltHeightField = new TextField("", skin);
+        beltThicknessField = new TextField("", skin);
+        beltCountField = new TextField("", skin);
 
         Table fields = new Table(skin);
         fields.defaults().pad(4f).left();
@@ -764,10 +793,24 @@ public class ModdingScreen {
         fields.add(bodyXField).width(80f).row();
         fields.add(new Label("Y", skin)).width(110f);
         fields.add(bodyYField).width(80f).row();
-        fields.add(new Label("Size", skin)).width(110f);
+        bodySizeLabel = new Label("Size", skin);
+        fields.add(bodySizeLabel).width(110f);
         fields.add(bodySizeField).width(80f).row();
-        fields.add(new Label("Station kind", skin)).width(110f);
+        bodyStationKindLabel = new Label("Station kind", skin);
+        fields.add(bodyStationKindLabel).width(110f);
         fields.add(bodyStationKindSelect).width(140f).row();
+        beltWidthLabel = new Label("Belt width", skin);
+        fields.add(beltWidthLabel).width(110f);
+        fields.add(beltWidthField).width(80f).row();
+        beltHeightLabel = new Label("Belt height", skin);
+        fields.add(beltHeightLabel).width(110f);
+        fields.add(beltHeightField).width(80f).row();
+        beltThicknessLabel = new Label("Belt thickness", skin);
+        fields.add(beltThicknessLabel).width(110f);
+        fields.add(beltThicknessField).width(80f).row();
+        beltCountLabel = new Label("Asteroid count", skin);
+        fields.add(beltCountLabel).width(110f);
+        fields.add(beltCountField).width(80f).row();
         Label dragHint = new Label("(drag map or edit fields)", skin);
         dragHint.setWrap(true);
         fields.add(dragHint).colspan(2).width(250f).row();
@@ -797,35 +840,103 @@ public class ModdingScreen {
         data.worldWidth = parseFloatSafe(systemWorldWidthField, data.worldWidth);
         data.worldHeight = parseFloatSafe(systemWorldHeightField, data.worldHeight);
 
+        syncSelectedSystemFieldsToData();
+        data.normalize();
+    }
+
+    /** Push the selection panel fields into the selected body/belt for live map preview. */
+    private void syncSelectedSystemFieldsToData() {
+        boolean dragging = starSystemEditor.isDraggingSelection();
+
         StarSystemBody selected = starSystemEditor.getSelectedBody();
         if (selected != null) {
             selected.name = bodyNameField.getText().trim();
             if (selected.name.isBlank()) {
                 selected.normalize();
             }
-            selected.x = parseFloatSafe(bodyXField, selected.x);
-            selected.y = parseFloatSafe(bodyYField, selected.y);
+            if (!dragging) {
+                selected.x = parseFloatSafe(bodyXField, selected.x);
+                selected.y = parseFloatSafe(bodyYField, selected.y);
+            }
             selected.size = parseFloatSafe(bodySizeField, selected.size);
             if (selected.type == StarSystemBody.Kind.SPACE_STATION && bodyStationKindSelect != null) {
                 selected.stationKind = bodyStationKindSelect.getSelected();
             }
             selected.normalize();
         }
-        data.normalize();
+
+        StarSystemAsteroidBelt selectedBelt = starSystemEditor.getSelectedAsteroidBelt();
+        if (selectedBelt != null) {
+            selectedBelt.name = bodyNameField.getText().trim();
+            if (selectedBelt.name.isBlank()) {
+                selectedBelt.normalize();
+            }
+            if (!dragging) {
+                selectedBelt.x = parseFloatSafe(bodyXField, selectedBelt.x);
+                selectedBelt.y = parseFloatSafe(bodyYField, selectedBelt.y);
+            }
+            selectedBelt.width = parseFloatSafe(beltWidthField, selectedBelt.width);
+            selectedBelt.height = parseFloatSafe(beltHeightField, selectedBelt.height);
+            selectedBelt.beltThickness = parseFloatSafe(beltThicknessField, selectedBelt.beltThickness);
+            selectedBelt.asteroidCount = parseIntSafe(beltCountField, selectedBelt.asteroidCount);
+            selectedBelt.normalize();
+        }
     }
 
-    private void refreshSystemSelectionUI() {
+    private void syncSelectionPositionFieldsFromData() {
+        StarSystemBody selected = starSystemEditor.getSelectedBody();
+        if (selected != null) {
+            bodyXField.setText(Integer.toString(Math.round(selected.x)));
+            bodyYField.setText(Integer.toString(Math.round(selected.y)));
+            return;
+        }
+        StarSystemAsteroidBelt selectedBelt = starSystemEditor.getSelectedAsteroidBelt();
+        if (selectedBelt != null) {
+            bodyXField.setText(Integer.toString(Math.round(selectedBelt.x)));
+            bodyYField.setText(Integer.toString(Math.round(selectedBelt.y)));
+        }
+    }
+
+    private static int parseIntSafe(TextField field, int fallback) {
+        if (field == null) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(field.getText().trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private void refreshSystemSelectionSummary() {
         if (systemSelectionLabel != null) {
             systemSelectionLabel.setText(starSystemEditor.getSelectionSummary());
         }
+    }
 
+    private void refreshSystemSelectionFields() {
         StarSystemBody selected = starSystemEditor.getSelectedBody();
-        if (selected == null) {
+        StarSystemAsteroidBelt selectedBelt = starSystemEditor.getSelectedAsteroidBelt();
+        if (selected == null && selectedBelt == null) {
             if (bodyNameField != null) bodyNameField.setText("");
             if (bodyXField != null) bodyXField.setText("");
             if (bodyYField != null) bodyYField.setText("");
             if (bodySizeField != null) bodySizeField.setText("");
-            if (bodyStationKindSelect != null) bodyStationKindSelect.setVisible(false);
+            setBodyFieldRowsVisible(false);
+            setBeltFieldRowsVisible(false);
+            return;
+        }
+
+        if (selectedBelt != null) {
+            bodyNameField.setText(selectedBelt.name);
+            bodyXField.setText(Integer.toString(Math.round(selectedBelt.x)));
+            bodyYField.setText(Integer.toString(Math.round(selectedBelt.y)));
+            beltWidthField.setText(Integer.toString(Math.round(selectedBelt.width)));
+            beltHeightField.setText(Integer.toString(Math.round(selectedBelt.height)));
+            beltThicknessField.setText(Integer.toString(Math.round(selectedBelt.beltThickness)));
+            beltCountField.setText(Integer.toString(selectedBelt.asteroidCount));
+            setBodyFieldRowsVisible(false);
+            setBeltFieldRowsVisible(true);
             return;
         }
 
@@ -833,15 +944,43 @@ public class ModdingScreen {
         bodyXField.setText(Integer.toString(Math.round(selected.x)));
         bodyYField.setText(Integer.toString(Math.round(selected.y)));
         bodySizeField.setText(Integer.toString(Math.round(selected.size)));
+        setBeltFieldRowsVisible(false);
+        setBodyFieldRowsVisible(true);
         if (bodyStationKindSelect != null) {
             boolean station = selected.type == StarSystemBody.Kind.SPACE_STATION;
             bodyStationKindSelect.setVisible(station);
+            bodyStationKindLabel.setVisible(station);
             if (station) {
                 bodyStationKindSelect.setSelected(
                     selected.stationKind != null ? selected.stationKind : StationKind.TRADER
                 );
             }
         }
+    }
+
+    private void refreshSystemSelectionUI() {
+        refreshSystemSelectionSummary();
+        lastSyncedSystemBody = starSystemEditor.getSelectedBody();
+        lastSyncedSystemBelt = starSystemEditor.getSelectedAsteroidBelt();
+        refreshSystemSelectionFields();
+    }
+
+    private void setBodyFieldRowsVisible(boolean visible) {
+        if (bodySizeLabel != null) bodySizeLabel.setVisible(visible);
+        if (bodySizeField != null) bodySizeField.setVisible(visible);
+        if (bodyStationKindLabel != null) bodyStationKindLabel.setVisible(visible);
+        if (bodyStationKindSelect != null) bodyStationKindSelect.setVisible(visible);
+    }
+
+    private void setBeltFieldRowsVisible(boolean visible) {
+        if (beltWidthLabel != null) beltWidthLabel.setVisible(visible);
+        if (beltWidthField != null) beltWidthField.setVisible(visible);
+        if (beltHeightLabel != null) beltHeightLabel.setVisible(visible);
+        if (beltHeightField != null) beltHeightField.setVisible(visible);
+        if (beltThicknessLabel != null) beltThicknessLabel.setVisible(visible);
+        if (beltThicknessField != null) beltThicknessField.setVisible(visible);
+        if (beltCountLabel != null) beltCountLabel.setVisible(visible);
+        if (beltCountField != null) beltCountField.setVisible(visible);
     }
 
     private void openCreateSystemDialog() {
@@ -1421,7 +1560,20 @@ public class ModdingScreen {
             refreshSelectionUI();
         } else if (mode == Mode.EDIT_SYSTEM) {
             starSystemEditor.update(deltaTime);
-            refreshSystemSelectionUI();
+            boolean dragging = starSystemEditor.isDraggingSelection();
+            if (wasDraggingSystemSelection && !dragging) {
+                syncSelectionPositionFieldsFromData();
+            }
+            syncSelectedSystemFieldsToData();
+            refreshSystemSelectionSummary();
+            wasDraggingSystemSelection = dragging;
+            StarSystemBody body = starSystemEditor.getSelectedBody();
+            StarSystemAsteroidBelt belt = starSystemEditor.getSelectedAsteroidBelt();
+            if (body != lastSyncedSystemBody || belt != lastSyncedSystemBelt) {
+                lastSyncedSystemBody = body;
+                lastSyncedSystemBelt = belt;
+                refreshSystemSelectionFields();
+            }
         }
     }
 

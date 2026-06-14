@@ -423,6 +423,21 @@ public class GameWorld {
         }
 
         ensureOrbitTargetsNonEmpty();
+        loadAsteroidBelts(systemLayout);
+    }
+
+    private void loadAsteroidBelts(StarSystemData systemLayout) {
+        if (systemLayout.asteroidBelts == null) {
+            return;
+        }
+        for (StarSystemAsteroidBelt belt : systemLayout.asteroidBelts) {
+            belt.normalize();
+            Array<GameObject> spawned = new Array<>();
+            AsteroidBeltGenerator.populate(belt, spawned);
+            for (GameObject asteroid : spawned) {
+                addBackgroundBody(asteroid);
+            }
+        }
     }
 
     private GameObject firstBodyOfType(GameObject.Type type) {
@@ -657,21 +672,33 @@ public class GameWorld {
             if (obj instanceof SpaceShip && !((SpaceShip) obj).isVisible()) {
                 continue;
             }
-
-            switch (obj.getType()) {
-                case PLANET:
-                    shapeRenderer.setColor(Color.ORANGE);
-                    shapeRenderer.circle(obj.getX(), obj.getY(), obj.getSize());
-                    break;
-                case SPACE_STATION:
-                    shapeRenderer.setColor(obj.getStationKind().displayColor);
-                    float halfSize = obj.getSize() / 2f;
-                    shapeRenderer.rect(obj.getX() - halfSize, obj.getY() - halfSize,
-                        obj.getSize(), obj.getSize());
-                    break;
-                case SPACE_SHIP:
-                    break;
+            if (obj.getType() != GameObject.Type.PLANET) {
+                continue;
             }
+            shapeRenderer.setColor(Color.ORANGE);
+            shapeRenderer.circle(obj.getX(), obj.getY(), obj.getSize());
+        }
+        for (GameObject obj : gameObjects) {
+            if (obj instanceof SpaceShip && !((SpaceShip) obj).isVisible()) {
+                continue;
+            }
+            if (obj.getType() != GameObject.Type.ASTEROID) {
+                continue;
+            }
+            shapeRenderer.setColor(Color.WHITE);
+            shapeRenderer.circle(obj.getX(), obj.getY(), obj.getSize());
+        }
+        for (GameObject obj : gameObjects) {
+            if (obj instanceof SpaceShip && !((SpaceShip) obj).isVisible()) {
+                continue;
+            }
+            if (obj.getType() != GameObject.Type.SPACE_STATION) {
+                continue;
+            }
+            shapeRenderer.setColor(obj.getStationKind().displayColor);
+            float halfSize = obj.getSize() / 2f;
+            shapeRenderer.rect(obj.getX() - halfSize, obj.getY() - halfSize,
+                obj.getSize(), obj.getSize());
         }
         projectileManager.render(shapeRenderer);
         shapeRenderer.end();

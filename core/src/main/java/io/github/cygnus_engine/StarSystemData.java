@@ -13,6 +13,7 @@ public class StarSystemData {
     public float worldHeight = 600f;
 
     public List<StarSystemBody> bodies = new ArrayList<>();
+    public List<StarSystemAsteroidBelt> asteroidBelts = new ArrayList<>();
 
     public void normalize() {
         if (id == null || id.isBlank()) {
@@ -33,6 +34,13 @@ public class StarSystemData {
         bodies.removeIf(b -> b == null);
         for (StarSystemBody body : bodies) {
             body.normalize();
+        }
+        if (asteroidBelts == null) {
+            asteroidBelts = new ArrayList<>();
+        }
+        asteroidBelts.removeIf(b -> b == null);
+        for (StarSystemAsteroidBelt belt : asteroidBelts) {
+            belt.normalize();
         }
     }
 

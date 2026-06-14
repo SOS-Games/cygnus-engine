@@ -2,7 +2,7 @@ package io.github.cygnus_engine;
 
 public class GameObject {
     public enum Type {
-        PLANET, SPACE_STATION, SPACE_SHIP, DEBUG_INDICATOR
+        PLANET, ASTEROID, SPACE_STATION, SPACE_SHIP, DEBUG_INDICATOR
     }
     
     private Type type;
@@ -59,12 +59,11 @@ public class GameObject {
                 float dy = y - pointY;
                 distance = Math.sqrt(dx * dx + dy * dy);
                 return distance < size;
-                /*
-                float dx = pointX - x;
-                float dy = pointY - y;
-                
-                return (dx * dx + dy * dy) <= size * size;
-                 */
+            case ASTEROID:
+                float adx = pointX - x;
+                float ady = pointY - y;
+                distance = Math.sqrt(adx * adx + ady * ady);
+                return distance < size;
             case SPACE_STATION:
                 float halfSize = size / 2f;
                 boolean xInRange = pointX >= x - halfSize && pointX <= x + halfSize;
@@ -106,9 +105,9 @@ public class GameObject {
     public float getSize() { return size; }
     public String getName() { return name; }
 
-    /** Planets are rendered as scenery and excluded from orbit AI and player interaction. */
+    /** Planets and asteroids are scenery and excluded from orbit AI and player interaction. */
     public boolean isInteractable() {
-        return type != Type.PLANET;
+        return type != Type.PLANET && type != Type.ASTEROID;
     }
 
     public StationKind getStationKind() {

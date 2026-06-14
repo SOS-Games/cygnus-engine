@@ -969,7 +969,7 @@ public class SpaceShip extends GameObject {
         }
 
         out.set(0f, -1f);
-        out.rotate(ShipSpriteOrientation.gameAngleToLocalTransformRotation(getRotation()));
+        out.rotateDeg(ShipSpriteOrientation.gameAngleToLocalTransformRotation(getRotation()));
         if (out.len2() > 0.0001f) {
             out.nor();
         }
