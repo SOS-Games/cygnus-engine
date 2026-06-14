@@ -64,6 +64,7 @@ public class GameWorld {
     private float worldPerPixelX = 1f;
     private float worldPerPixelY = 1f;
     private final Vector2 renderSnapScratch = new Vector2();
+    private final Vector2 spawnPositionScratch = new Vector2();
 
     private SpriteBatch spriteBatch;
     private final Array<ShipData> shipTemplates = new Array<>();
@@ -145,6 +146,38 @@ public class GameWorld {
         }
         return DEFAULT_SHIP_RADIUS;
     }
+
+    private void randomSpawnPositionAround(GameObject anchor, float shipRadius, Vector2 out) {
+        float angleDeg = MathUtils.random(0f, 360f);
+        float minDist = anchor.getSize() + shipRadius + SHIP_SPAWN_MIN_CLEARANCE;
+        float maxDist = minDist + SHIP_SPAWN_MAX_EXTRA_RADIUS;
+        float dist = MathUtils.random(minDist, maxDist);
+        out.set(
+            anchor.getX() + MathUtils.cosDeg(angleDeg) * dist,
+            anchor.getY() + MathUtils.sinDeg(angleDeg) * dist
+        );
+    }
+
+    private SpaceShip createShipFromTemplate(
+        ShipData template,
+        float x,
+        float y,
+        String name,
+        GameObject anchor
+    ) {
+        float shipRadius = shipRadiusFromShipData(template);
+        SpaceShip ship = new SpaceShip(x, y, shipRadius, name, anchor, template.speed);
+        ship.configureFromShipData(template);
+        ship.setHullSprite(createHullSprite(template));
+        ship.configureWeaponInstances(buildWeaponInstances(template));
+        return ship;
+    }
+
+    private void registerShip(SpaceShip ship) {
+        spaceShips.add(ship);
+        gameObjects.add(ship);
+        GameUtils.addSpaceShip(ship);
+    }
     
     private void initialize() {
         StarSystemData systemLayout = StarSystemDataIO.loadPreferredForGameplay();
@@ -178,8 +211,7 @@ public class GameWorld {
             NpcShipRole role = pickNpcShipRole();
             GameObject spawnAnchor = pickSpawnAnchorForRole(role);
             ShipData template = pickRandomNpcShipTemplate();
-            float shipRadius = shipRadiusFromShipData(template);
-            spawnShipNearOrbitTarget(i, spawnAnchor, template, shipRadius, role);
+            spawnShipNearOrbitTarget(i, spawnAnchor, template, role);
         }
 
         spawnMinersForMiningStations();
@@ -216,29 +248,16 @@ public class GameWorld {
 
     private void spawnMinerNearStation(int index, GameObject station, ShipData template) {
         float shipRadius = shipRadiusFromShipData(template);
-        float angleDeg = MathUtils.random(0f, 360f);
-        float minDist = station.getSize() + shipRadius + SHIP_SPAWN_MIN_CLEARANCE;
-        float maxDist = minDist + SHIP_SPAWN_MAX_EXTRA_RADIUS;
-        float dist = MathUtils.random(minDist, maxDist);
-        float x = station.getX() + MathUtils.cosDeg(angleDeg) * dist;
-        float y = station.getY() + MathUtils.sinDeg(angleDeg) * dist;
-
-        SpaceShip ship = new SpaceShip(
-            x,
-            y,
-            shipRadius,
+        randomSpawnPositionAround(station, shipRadius, spawnPositionScratch);
+        SpaceShip ship = createShipFromTemplate(
+            template,
+            spawnPositionScratch.x,
+            spawnPositionScratch.y,
             "Miner " + (index + 1) + " (" + template.id + ")",
-            station,
-            template.speed
+            station
         );
-        ship.configureFromShipData(template);
-        ship.setHullSprite(createHullSprite(template));
-        ship.configureWeaponInstances(buildWeaponInstances(template));
         ship.configureAsMiner(station);
-
-        spaceShips.add(ship);
-        gameObjects.add(ship);
-        GameUtils.addSpaceShip(ship);
+        registerShip(ship);
     }
 
     private void refreshMineableAsteroids() {
@@ -324,41 +343,30 @@ public class GameWorld {
         int index,
         GameObject orbitTarget,
         ShipData template,
-        float shipRadius,
         NpcShipRole role
     ) {
-        float angleDeg = MathUtils.random(0f, 360f);
-        float minDist = orbitTarget.getSize() + shipRadius + SHIP_SPAWN_MIN_CLEARANCE;
-        float maxDist = minDist + SHIP_SPAWN_MAX_EXTRA_RADIUS;
-        float dist = MathUtils.random(minDist, maxDist);
-        float x = orbitTarget.getX() + MathUtils.cosDeg(angleDeg) * dist;
-        float y = orbitTarget.getY() + MathUtils.sinDeg(angleDeg) * dist;
+        float shipRadius = shipRadiusFromShipData(template);
+        randomSpawnPositionAround(orbitTarget, shipRadius, spawnPositionScratch);
 
         String rolePrefix = switch (role) {
             case TRADER -> "Trader";
             case MILITIA -> "Militia";
             case CIVILIAN -> "Civilian";
         };
-        SpaceShip ship = new SpaceShip(
-            x,
-            y,
-            shipRadius,
+        SpaceShip ship = createShipFromTemplate(
+            template,
+            spawnPositionScratch.x,
+            spawnPositionScratch.y,
             rolePrefix + " " + (index + 1) + " (" + template.id + ")",
-            orbitTarget,
-            template.speed
+            orbitTarget
         );
-        ship.configureFromShipData(template);
-        ship.setHullSprite(createHullSprite(template));
-        ship.configureWeaponInstances(buildWeaponInstances(template));
         switch (role) {
             case TRADER -> ship.configureAsTrader(orbitTargets);
             case MILITIA -> ship.configureAsMilitiaPatrol(stationsForRole(NpcShipRole.MILITIA));
             case CIVILIAN -> ship.configureAsCivilian(orbitTarget);
         }
 
-        spaceShips.add(ship);
-        gameObjects.add(ship);
-        GameUtils.addSpaceShip(ship);
+        registerShip(ship);
     }
 
     private ShipData pickPlayerShipTemplate() {
@@ -373,30 +381,17 @@ public class GameWorld {
         ShipData template = pickPlayerShipTemplate();
         GameObject anchor = pickRandomOrbitTarget();
         float shipRadius = shipRadiusFromShipData(template);
+        randomSpawnPositionAround(anchor, shipRadius, spawnPositionScratch);
 
-        float angleDeg = MathUtils.random(0f, 360f);
-        float minDist = anchor.getSize() + shipRadius + SHIP_SPAWN_MIN_CLEARANCE;
-        float maxDist = minDist + SHIP_SPAWN_MAX_EXTRA_RADIUS;
-        float dist = MathUtils.random(minDist, maxDist);
-        float x = anchor.getX() + MathUtils.cosDeg(angleDeg) * dist;
-        float y = anchor.getY() + MathUtils.sinDeg(angleDeg) * dist;
-
-        playerShip = new SpaceShip(
-            x,
-            y,
-            shipRadius,
+        playerShip = createShipFromTemplate(
+            template,
+            spawnPositionScratch.x,
+            spawnPositionScratch.y,
             "Player (" + template.id + ")",
-            anchor,
-            template.speed
+            anchor
         );
-        playerShip.configureFromShipData(template);
-        playerShip.setHullSprite(createHullSprite(template));
-        playerShip.configureWeaponInstances(buildWeaponInstances(template));
         playerShip.configureAsPlayer(anchor);
-
-        spaceShips.add(playerShip);
-        gameObjects.add(playerShip);
-        GameUtils.addSpaceShip(playerShip);
+        registerShip(playerShip);
     }
 
     public SpaceShip getPlayerShip() {
@@ -413,26 +408,18 @@ public class GameWorld {
 
         GameObject anchor = pickRandomOrbitTarget();
         ShipData template = shipTemplates.get(MathUtils.random(shipTemplates.size - 1));
-        float shipRadius = shipRadiusFromShipData(template);
 
         pirateSpawnCounter++;
-        SpaceShip ship = new SpaceShip(
+        SpaceShip ship = createShipFromTemplate(
+            template,
             0f,
             0f,
-            shipRadius,
             "Pirate " + pirateSpawnCounter + " (" + template.id + ")",
-            anchor,
-            template.speed
+            anchor
         );
-        ship.configureFromShipData(template);
-        ship.setHullSprite(createHullSprite(template));
-        ship.configureWeaponInstances(buildWeaponInstances(template));
         ship.configureAsPirate(anchor);
         ship.beginWarpInNear(anchor);
-
-        spaceShips.add(ship);
-        gameObjects.add(ship);
-        GameUtils.addSpaceShip(ship);
+        registerShip(ship);
     }
 
     private int countActivePirates() {

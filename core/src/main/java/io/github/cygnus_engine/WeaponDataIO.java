@@ -2,9 +2,6 @@ package io.github.cygnus_engine;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
-import com.badlogic.gdx.utils.Json;
-import com.badlogic.gdx.utils.JsonWriter;
-
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -13,18 +10,12 @@ import java.util.Map;
 public final class WeaponDataIO {
     private WeaponDataIO() {}
 
-    private static Json newJson() {
-        Json json = new Json();
-        json.setOutputType(JsonWriter.OutputType.json);
-        return json;
-    }
-
     /** Load a weapon from an explicit JSON file path. */
     public static WeaponData loadFromJsonFile(FileHandle jsonFile) {
         if (jsonFile == null || !jsonFile.exists()) {
             return null;
         }
-        WeaponData data = newJson().fromJson(WeaponData.class, jsonFile);
+        WeaponData data = ModJson.newJson().fromJson(WeaponData.class, jsonFile);
         if (data.id == null || data.id.isBlank()) {
             data.id = jsonFile.nameWithoutExtension();
         }
@@ -41,7 +32,7 @@ public final class WeaponDataIO {
 
         if (f == null || !f.exists()) return null;
 
-        WeaponData data = newJson().fromJson(WeaponData.class, f);
+        WeaponData data = ModJson.newJson().fromJson(WeaponData.class, f);
 
         if (data.id == null || data.id.isBlank()) data.id = weaponId;
         if (data.name == null || data.name.isBlank()) data.name = data.id;
@@ -67,7 +58,7 @@ public final class WeaponDataIO {
                 if (!"json".equalsIgnoreCase(f.extension())) continue;
 
                 try {
-                    WeaponData w = newJson().fromJson(WeaponData.class, f);
+                    WeaponData w = ModJson.newJson().fromJson(WeaponData.class, f);
 
                     if (w.id == null || w.id.isBlank()) w.id = f.nameWithoutExtension();
                     if (w.name == null || w.name.isBlank()) w.name = w.id;
@@ -100,7 +91,7 @@ public final class WeaponDataIO {
                 if (!"json".equalsIgnoreCase(f.extension())) continue;
 
                 try {
-                    WeaponData w = newJson().fromJson(WeaponData.class, f);
+                    WeaponData w = ModJson.newJson().fromJson(WeaponData.class, f);
 
                     if (weaponId.equals(w.id)) return f;
                 } catch (Exception ignored) {
@@ -114,7 +105,7 @@ public final class WeaponDataIO {
         if (data == null) throw new IllegalArgumentException("WeaponData must not be null");
         if (targetJsonFile == null) throw new IllegalArgumentException("targetJsonFile must not be null");
         targetJsonFile.parent().mkdirs();
-        String text = newJson().prettyPrint(data);
+        String text = ModJson.newJson().prettyPrint(data);
         targetJsonFile.writeString(text, false, "UTF-8");
         Gdx.app.log("WeaponDataIO", "Saved weapon data to " + targetJsonFile.path());
     }

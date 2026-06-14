@@ -2,18 +2,9 @@ package io.github.cygnus_engine;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
-import com.badlogic.gdx.utils.Json;
-import com.badlogic.gdx.utils.JsonWriter;
 
 public final class ShipDataIO {
     private ShipDataIO() {}
-
-    private static Json newJson() {
-        Json json = new Json();
-        json.setOutputType(JsonWriter.OutputType.json);
-        // Keep defaults; Vector2/Rectangle serialize fine as plain objects.
-        return json;
-    }
 
     public static FileHandle toJsonFileForTexture(FileHandle textureFile) {
         return textureFile.sibling(textureFile.nameWithoutExtension() + ".json");
@@ -23,7 +14,7 @@ public final class ShipDataIO {
         FileHandle jsonFile = toJsonFileForTexture(textureFile);
         ShipData data;
         if (jsonFile.exists()) {
-            data = newJson().fromJson(ShipData.class, jsonFile);
+            data = ModJson.newJson().fromJson(ShipData.class, jsonFile);
         } else {
             data = new ShipData();
         }
@@ -46,7 +37,7 @@ public final class ShipDataIO {
         if (jsonFile == null || !jsonFile.exists()) {
             return null;
         }
-        ShipData data = newJson().fromJson(ShipData.class, jsonFile);
+        ShipData data = ModJson.newJson().fromJson(ShipData.class, jsonFile);
         if (data.id == null || data.id.isBlank()) {
             data.id = jsonFile.nameWithoutExtension();
         }
@@ -66,7 +57,7 @@ public final class ShipDataIO {
 
         data.normalizeOuterBounds();
         targetJsonFile.parent().mkdirs();
-        String text = newJson().prettyPrint(data);
+        String text = ModJson.newJson().prettyPrint(data);
         targetJsonFile.writeString(text, false, "UTF-8");
         Gdx.app.log("ShipDataIO", "Saved ship data to " + targetJsonFile.path());
     }

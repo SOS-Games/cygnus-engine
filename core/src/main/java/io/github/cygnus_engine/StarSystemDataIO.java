@@ -2,9 +2,6 @@ package io.github.cygnus_engine;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
-import com.badlogic.gdx.utils.Json;
-import com.badlogic.gdx.utils.JsonWriter;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -12,17 +9,11 @@ import java.util.List;
 public final class StarSystemDataIO {
     private StarSystemDataIO() {}
 
-    private static Json newJson() {
-        Json json = new Json();
-        json.setOutputType(JsonWriter.OutputType.json);
-        return json;
-    }
-
     public static StarSystemData loadFromJson(FileHandle jsonFile) {
         if (jsonFile == null || !jsonFile.exists()) {
             return null;
         }
-        StarSystemData data = newJson().fromJson(StarSystemData.class, jsonFile);
+        StarSystemData data = ModJson.newJson().fromJson(StarSystemData.class, jsonFile);
         if (data.id == null || data.id.isBlank()) {
             data.id = jsonFile.nameWithoutExtension();
         }
@@ -39,7 +30,7 @@ public final class StarSystemDataIO {
         }
         data.normalize();
         targetJsonFile.parent().mkdirs();
-        String text = newJson().prettyPrint(data);
+        String text = ModJson.newJson().prettyPrint(data);
         targetJsonFile.writeString(text, false, "UTF-8");
         Gdx.app.log("StarSystemDataIO", "Saved star system to " + targetJsonFile.path());
     }

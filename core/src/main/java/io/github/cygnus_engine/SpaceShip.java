@@ -298,14 +298,19 @@ public class SpaceShip extends GameObject {
         recomputeCombatRangesFromWeapons();
     }
 
-    /** Traders cycle all stops and dock at stations. */
-    public void configureAsTrader(Array<GameObject> stops) {
-        trader = true;
+    private void clearAllRoles() {
+        trader = false;
         militiaPatrol = false;
         pirate = false;
         civilian = false;
         miner = false;
         playerControlled = false;
+    }
+
+    /** Traders cycle all stops and dock at stations. */
+    public void configureAsTrader(Array<GameObject> stops) {
+        clearAllRoles();
+        trader = true;
         tradeRoute.clear();
         if (stops != null) {
             for (GameObject stop : stops) {
@@ -323,12 +328,8 @@ public class SpaceShip extends GameObject {
 
     /** Militia patrol one anchor at a time and occasionally relocate to another body. */
     public void configureAsMilitiaPatrol(Array<GameObject> anchors) {
-        trader = false;
+        clearAllRoles();
         militiaPatrol = true;
-        pirate = false;
-        civilian = false;
-        miner = false;
-        playerControlled = false;
         patrolAnchors.clear();
         if (anchors != null) {
             for (GameObject anchor : anchors) {
@@ -347,12 +348,8 @@ public class SpaceShip extends GameObject {
 
     /** Pirates arrive via warp-in only; they patrol locally after decelerating. */
     public void configureAsPirate(GameObject anchor) {
-        trader = false;
-        militiaPatrol = false;
+        clearAllRoles();
         pirate = true;
-        civilian = false;
-        miner = false;
-        playerControlled = false;
         if (anchor != null) {
             orbitTarget = anchor;
         }
@@ -361,12 +358,8 @@ public class SpaceShip extends GameObject {
 
     /** Civilians orbit one anchor locally and engage pirates that enter range. */
     public void configureAsCivilian(GameObject anchor) {
-        trader = false;
-        militiaPatrol = false;
-        pirate = false;
+        clearAllRoles();
         civilian = true;
-        miner = false;
-        playerControlled = false;
         if (anchor != null) {
             orbitTarget = anchor;
         }
@@ -379,12 +372,8 @@ public class SpaceShip extends GameObject {
 
     /** Cycle between nearby asteroids and a mining station home base. */
     public void configureAsMiner(GameObject station) {
-        trader = false;
-        militiaPatrol = false;
-        pirate = false;
-        civilian = false;
+        clearAllRoles();
         miner = true;
-        playerControlled = false;
         miningStation = station;
         orbitTarget = station;
         miningTarget = null;
@@ -399,11 +388,7 @@ public class SpaceShip extends GameObject {
     }
 
     public void configureAsPlayer(GameObject anchor) {
-        trader = false;
-        militiaPatrol = false;
-        pirate = false;
-        civilian = false;
-        miner = false;
+        clearAllRoles();
         playerControlled = true;
         if (anchor != null) {
             orbitTarget = anchor;

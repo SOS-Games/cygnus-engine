@@ -1,6 +1,6 @@
 # cygnus-engine
 
-A [LibGDX](https://libgdx.com/) space sandbox: AI ships orbit planets and stations, fight with moddable hulls and weapons, and support basic trading. Includes an in-game **Modding** screen to edit ship layouts and weapon definitions.
+A [LibGDX](https://libgdx.com/) space sandbox: AI ships trade, patrol, fight, and mine around moddable star systems. Hulls, weapons, and system layouts are JSON-driven. Includes an in-game **Modding** screen to edit ships, weapons, and star systems.
 
 Built with [gdx-liftoff](https://github.com/libgdx/gdx-liftoff); desktop target uses LWJGL3.
 
@@ -9,12 +9,15 @@ Built with [gdx-liftoff](https://github.com/libgdx/gdx-liftoff); desktop target 
 **Main menu**
 
 - **Play** — spawns ships from mod templates; click objects for info, scroll to zoom, click a ship to follow it with the camera.
-- **Modding** — ship editor (mounts, colliders, COM, textures) and weapon editor.
+- **Modding** — ship editor (mounts, colliders, COM, textures), weapon editor, and star-system editor (stations, asteroid belts).
 - **Exit**
 
 **Play mode**
 
-- Ships patrol between a planet and space station, acquire combat targets, orbit, and fire projectiles (ballistic and homing).
+- Star systems load from `mods/core/systems/*.json`: space stations, background planets, and procedural asteroid belts.
+- **Station kinds:** trader (trade routes), militia/civilian (patrol + optional docking), mining (home base for miners).
+- **Miners** fly from a mining station, mine several asteroids with a mining laser, return to dock, and repeat.
+- Traders, militia, civilians, and pirates use combat AI (ballistic and homing weapons), orbit behavior, and station berthing.
 - Click a ship to open its debug/info window (behavior, combat target, trade).
 
 See [MODDING.md](MODDING.md) for project layout, modules, and ship/weapon JSON format.
