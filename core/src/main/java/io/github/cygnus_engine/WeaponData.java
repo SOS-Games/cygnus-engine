@@ -27,7 +27,12 @@ public class WeaponData {
     
     /** If true, projectile steers toward {@link SpaceShip}'s combat target each tick (see {@link #homingTurnRateDegPerSec}). */
     public boolean homing = false;
-    public float homingTurnRateDegPerSec = 140f;
+    /** Homing turn rate in degrees per second when {@link #homing} is true. */
+    public float homingTurnRateDegPerSec = 120f;
+    /** If true, projectiles damage {@link GameObject.Type#ASTEROID} bodies instead of ships. */
+    public boolean minesAsteroids = false;
+    /** Damage applied to an asteroid per hit when {@link #minesAsteroids} is true. */
+    public float miningDamage = 12f;
 
     public boolean canEquipOn(WeaponSlot.SlotType slotType) {
         return switch (slotType) {

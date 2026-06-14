@@ -1,0 +1,40 @@
+{
+"id": "miner",
+"name": "Miner",
+"texturePath": "mods/core/medium fighter 4.png",
+"speed": 160,
+"maneuverability": 2.2,
+"cargoSpace": 8,
+"hullTurnDegPerSec": 120,
+"centerOfMass": {
+	"x": 1,
+	"y": -1
+},
+"weaponSlots": [
+	{
+		"id": "mining_laser",
+		"y": 8,
+		"type": "HARDPOINT",
+		"equippedWeaponId": "mining_laser"
+	}
+],
+"enginePositions": [
+	{
+		"x": -12,
+		"y": -18
+	},
+	{
+		"x": 12,
+		"y": -18
+	}
+],
+"colliders": [
+	{
+		"x": 1,
+		"radius": 20
+	}
+],
+"outerBounds": {
+	"radius": 34
+}
+}

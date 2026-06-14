@@ -23,6 +23,14 @@
 	},
 	{
 		"type": "SPACE_STATION",
+		"stationKind": "MINING",
+		"name": "Mining Depot",
+		"x": 400,
+		"y": 320,
+		"size": 50
+	},
+	{
+		"type": "SPACE_STATION",
 		"stationKind": "CIVILIAN",
 		"name": "Civilian Port",
 		"x": 160,

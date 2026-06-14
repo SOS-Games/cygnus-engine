@@ -13,6 +13,7 @@ public class GameObject {
     private float size; // radius for circle, side length for square/triangle
     private String name;
     private StationKind stationKind = StationKind.TRADER;
+    private float hitPoints = 0f;
     
     public GameObject(Type type, float x, float y, float size, String name) {
         this(type, x, y, size, name, StationKind.TRADER);
@@ -126,6 +127,28 @@ public class GameObject {
 
     public boolean isSpaceStation() {
         return type == Type.SPACE_STATION;
+    }
+
+    public boolean isAsteroid() {
+        return type == Type.ASTEROID;
+    }
+
+    /** Asteroids with remaining hit points can be mined. */
+    public boolean isMineable() {
+        return type == Type.ASTEROID && hitPoints > 0f;
+    }
+
+    public void configureAsAsteroid(float health) {
+        hitPoints = Math.max(1f, health);
+    }
+
+    /** @return true when the asteroid is depleted and should be removed. */
+    public boolean applyMiningDamage(float amount) {
+        if (!isMineable()) {
+            return false;
+        }
+        hitPoints -= amount;
+        return hitPoints <= 0f;
     }
     
     // Setters for position (useful for wrapping)

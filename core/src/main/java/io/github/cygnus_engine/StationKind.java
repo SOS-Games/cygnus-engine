@@ -6,7 +6,8 @@ import com.badlogic.gdx.graphics.Color;
 public enum StationKind {
     TRADER(new Color(0.85f, 0.95f, 1f, 1f)),
     MILITIA(new Color(0.35f, 0.55f, 1f, 1f)),
-    CIVILIAN(new Color(0.55f, 0.9f, 0.45f, 1f));
+    CIVILIAN(new Color(0.55f, 0.9f, 0.45f, 1f)),
+    MINING(new Color(0.95f, 0.78f, 0.25f, 1f));
 
     public final Color displayColor;
 
@@ -21,6 +22,7 @@ public enum StationKind {
         return switch (raw.trim().toUpperCase()) {
             case "MILITIA" -> MILITIA;
             case "CIVILIAN" -> CIVILIAN;
+            case "MINING" -> MINING;
             default -> TRADER;
         };
     }

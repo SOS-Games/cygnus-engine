@@ -1,0 +1,15 @@
+{
+  "id": "mining_laser",
+  "name": "Mining Laser",
+  "type": "MINING",
+  "fireInterval": 0.1,
+  "projectileSpeed": 420,
+  "projectileLifetime": 0.75,
+  "projectileRadius": 2,
+  "turretSprite": "mods/core/basic turret.png",
+  "turretCompatible": true,
+  "hardpointCompatible": true,
+  "turnRateDegPerSec": 420,
+  "minesAsteroids": true,
+  "miningDamage": 14
+}

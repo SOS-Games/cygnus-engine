@@ -138,6 +138,15 @@ public final class StarSystemDataIO {
         belt.asteroidCount = 80;
         data.asteroidBelts.add(belt);
 
+        StarSystemBody miningStation = new StarSystemBody();
+        miningStation.type = StarSystemBody.Kind.SPACE_STATION;
+        miningStation.stationKind = StationKind.MINING;
+        miningStation.name = "Mining Depot";
+        miningStation.x = belt.x;
+        miningStation.y = belt.y;
+        miningStation.size = 50f;
+        data.bodies.add(miningStation);
+
         data.normalize();
         return data;
     }

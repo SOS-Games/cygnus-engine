@@ -137,12 +137,19 @@ public class SpaceShip extends GameObject {
     private static final float PATROL_DOCK_MAX_SECONDS = 18f;
     private static final float PATROL_DOCK_RETRY_MIN_SECONDS = 12f;
     private static final float PATROL_DOCK_RETRY_MAX_SECONDS = 28f;
+    private static final float MINER_TRANSIT_SPEED_FRACTION = 0.85f;
+    private static final float MINER_BERTH_SECONDS = 3.5f;
+    private static final float MINER_STATION_ARRIVAL_PADDING = 28f;
+    private static final float MINER_ASTEROID_STANDOFF_FRACTION = 0.9f;
+    private static final float MINER_NO_ASTEROID_RETRY_SECONDS = 6f;
+    private static final int MINER_ASTEROIDS_PER_HAUL = 5;
     private boolean isVisible = true;
 
     private boolean trader = false;
     private boolean militiaPatrol = false;
     private boolean pirate = false;
     private boolean civilian = false;
+    private boolean miner = false;
     private boolean playerControlled = false;
     private float playerForwardInput = 0f;
     private float playerStrafeInput = 0f;
@@ -164,6 +171,12 @@ public class SpaceShip extends GameObject {
     private float patrolRelocateInterval = 45f;
     private float patrolDockTimer = 0f;
     private float patrolDockInterval = 20f;
+    private GameObject miningStation;
+    private GameObject miningTarget;
+    private Array<GameObject> nearbyAsteroids;
+    private int minerAsteroidsMinedThisHaul = 0;
+    private float miningFireRange = DEFAULT_WEAPON_RANGE;
+    private float miningFireRangeSquared;
 
     private final Array<ShipWeaponInstance> weaponInstances = new Array<>();
     /** Copy of hull {@link ShipData#colliders} for projectile hits. */
@@ -185,6 +198,9 @@ public class SpaceShip extends GameObject {
         DOCKING_AUTO,
         DOCKED,
         MILITIA_TRANSIT,
+        MINER_TRANSIT_ASTEROID,
+        MINER_MINING,
+        MINER_TRANSIT_STATION,
         PLAYER_CONTROLLED,
         WARPING_OUT,
         WARPED_OUT,
@@ -288,6 +304,7 @@ public class SpaceShip extends GameObject {
         militiaPatrol = false;
         pirate = false;
         civilian = false;
+        miner = false;
         playerControlled = false;
         tradeRoute.clear();
         if (stops != null) {
@@ -310,6 +327,7 @@ public class SpaceShip extends GameObject {
         militiaPatrol = true;
         pirate = false;
         civilian = false;
+        miner = false;
         playerControlled = false;
         patrolAnchors.clear();
         if (anchors != null) {
@@ -333,6 +351,7 @@ public class SpaceShip extends GameObject {
         militiaPatrol = false;
         pirate = true;
         civilian = false;
+        miner = false;
         playerControlled = false;
         if (anchor != null) {
             orbitTarget = anchor;
@@ -346,6 +365,7 @@ public class SpaceShip extends GameObject {
         militiaPatrol = false;
         pirate = false;
         civilian = true;
+        miner = false;
         playerControlled = false;
         if (anchor != null) {
             orbitTarget = anchor;
@@ -357,11 +377,33 @@ public class SpaceShip extends GameObject {
         }
     }
 
+    /** Cycle between nearby asteroids and a mining station home base. */
+    public void configureAsMiner(GameObject station) {
+        trader = false;
+        militiaPatrol = false;
+        pirate = false;
+        civilian = false;
+        miner = true;
+        playerControlled = false;
+        miningStation = station;
+        orbitTarget = station;
+        miningTarget = null;
+        minerAsteroidsMinedThisHaul = 0;
+        combatTarget = null;
+        recomputeMiningFireRange();
+        beginNextMiningRun(true);
+    }
+
+    public void setNearbyAsteroids(Array<GameObject> asteroids) {
+        nearbyAsteroids = asteroids;
+    }
+
     public void configureAsPlayer(GameObject anchor) {
         trader = false;
         militiaPatrol = false;
         pirate = false;
         civilian = false;
+        miner = false;
         playerControlled = true;
         if (anchor != null) {
             orbitTarget = anchor;
@@ -447,6 +489,10 @@ public class SpaceShip extends GameObject {
 
     public boolean isCivilian() {
         return civilian;
+    }
+
+    public boolean isMiner() {
+        return miner;
     }
 
     /** Place off-screen relative to {@code anchor} and begin the warp-in deceleration pass. */
@@ -699,6 +745,17 @@ public class SpaceShip extends GameObject {
                 updateMilitiaTransit();
                 updatePatrolOrCombat(deltaTime, projectileManager, null);
                 break;
+            case MINER_TRANSIT_ASTEROID:
+                updateMinerTransitAsteroid(deltaTime);
+                updateWeaponAiming(deltaTime, null);
+                break;
+            case MINER_MINING:
+                updateMinerMining(deltaTime, projectileManager);
+                break;
+            case MINER_TRANSIT_STATION:
+                updateMinerTransitStation();
+                updateWeaponAiming(deltaTime, null);
+                break;
             case PLAYER_CONTROLLED:
                 updatePlayerControl(deltaTime, projectileManager);
                 break;
@@ -901,6 +958,20 @@ public class SpaceShip extends GameObject {
         float back = w.data.projectileRadius + 2f;
         float spawnX = w.worldPosCache.x + cos * back;
         float spawnY = w.worldPosCache.y + sin * back;
+
+        if (w.data.minesAsteroids) {
+            projectileManager.spawnMining(
+                this,
+                spawnX,
+                spawnY,
+                w.aimAngleDeg,
+                w.data.projectileSpeed,
+                w.data.projectileLifetime,
+                w.data.projectileRadius,
+                w.data.miningDamage
+            );
+            return;
+        }
 
         if (w.data.homing && homingTarget != null) {
             projectileManager.spawn(
@@ -1199,10 +1270,178 @@ public class SpaceShip extends GameObject {
             currentBehavior = Behavior.TRADER_TRANSIT;
         } else if (militiaPatrol) {
             currentBehavior = Behavior.FLYING_AROUND_TARGET;
+        } else if (miner) {
+            beginNextMiningRun(true);
         } else if (playerControlled) {
             currentBehavior = Behavior.PLAYER_CONTROLLED;
         } else {
             currentBehavior = Behavior.FLYING_AROUND_TARGET;
+        }
+    }
+
+    private void recomputeMiningFireRange() {
+        float maxWeaponRange = 0f;
+        for (ShipWeaponInstance w : weaponInstances) {
+            if (w.data == null || !w.data.minesAsteroids) {
+                continue;
+            }
+            float range = w.data.projectileSpeed * w.data.projectileLifetime;
+            maxWeaponRange = Math.max(maxWeaponRange, range);
+        }
+        if (maxWeaponRange <= 0f) {
+            maxWeaponRange = DEFAULT_WEAPON_RANGE;
+        }
+        miningFireRange = maxWeaponRange * 0.95f;
+        miningFireRangeSquared = miningFireRange * miningFireRange;
+    }
+
+    private void beginNextMiningRun(boolean resetHaul) {
+        if (resetHaul) {
+            minerAsteroidsMinedThisHaul = 0;
+        }
+        miningTarget = findNearestMineableAsteroid();
+        if (miningTarget == null) {
+            currentBehavior = Behavior.MINER_TRANSIT_STATION;
+        } else {
+            currentBehavior = Behavior.MINER_TRANSIT_ASTEROID;
+        }
+    }
+
+    private void onMinerAsteroidDepleted() {
+        miningTarget = null;
+        minerAsteroidsMinedThisHaul++;
+        if (minerAsteroidsMinedThisHaul >= MINER_ASTEROIDS_PER_HAUL) {
+            currentBehavior = Behavior.MINER_TRANSIT_STATION;
+            return;
+        }
+        beginNextMiningRun(false);
+        if (miningTarget == null && minerAsteroidsMinedThisHaul > 0) {
+            currentBehavior = Behavior.MINER_TRANSIT_STATION;
+        }
+    }
+
+    private GameObject findNearestMineableAsteroid() {
+        if (nearbyAsteroids == null || nearbyAsteroids.isEmpty()) {
+            return null;
+        }
+
+        GameObject best = null;
+        float bestDistSq = Float.MAX_VALUE;
+        for (GameObject asteroid : nearbyAsteroids) {
+            if (asteroid == null || !asteroid.isMineable()) {
+                continue;
+            }
+            float distSq = getDistanceToSquared(asteroid);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = asteroid;
+            }
+        }
+        return best;
+    }
+
+    private boolean isMiningTargetValid() {
+        return miningTarget != null && miningTarget.isMineable();
+    }
+
+    private void updateMinerTransitAsteroid(float deltaTime) {
+        if (!isMiningTargetValid()) {
+            beginNextMiningRun(false);
+            return;
+        }
+
+        float standoff = miningFireRange * MINER_ASTEROID_STANDOFF_FRACTION;
+        float arriveDist = standoff + miningTarget.getSize() + getSize();
+        if (getDistanceToSquared(miningTarget) <= arriveDist * arriveDist) {
+            currentBehavior = Behavior.MINER_MINING;
+            targetForwardSpeed = maxNormalSpeed * 0.25f;
+            targetStrafeSpeed = 0f;
+            return;
+        }
+
+        targetAngle = getAngleToTarget(miningTarget.getX(), miningTarget.getY());
+        targetForwardSpeed = maxNormalSpeed * MINER_TRANSIT_SPEED_FRACTION;
+        targetStrafeSpeed = 0f;
+    }
+
+    private void updateMinerMining(float deltaTime, ProjectileManager projectileManager) {
+        if (!isMiningTargetValid()) {
+            onMinerAsteroidDepleted();
+            return;
+        }
+
+        if (getDistanceToSquared(miningTarget) > miningFireRangeSquared * 1.2f) {
+            currentBehavior = Behavior.MINER_TRANSIT_ASTEROID;
+            return;
+        }
+
+        targetAngle = getAngleToTarget(miningTarget.getX(), miningTarget.getY());
+        targetForwardSpeed = maxNormalSpeed * 0.12f;
+        targetStrafeSpeed = 0f;
+        updateMinerWeaponAiming(deltaTime);
+        tryFireMining(projectileManager);
+    }
+
+    private void updateMinerTransitStation() {
+        if (miningStation == null) {
+            return;
+        }
+        if (isBerthing()) {
+            return;
+        }
+
+        targetAngle = getAngleToTarget(miningStation.getX(), miningStation.getY());
+        targetForwardSpeed = maxNormalSpeed * MINER_TRANSIT_SPEED_FRACTION;
+        targetStrafeSpeed = 0f;
+
+        float arriveDist = miningStation.getSize() + getSize() + MINER_STATION_ARRIVAL_PADDING;
+        if (getDistanceToSquared(miningStation) <= arriveDist * arriveDist) {
+            if (StationBerth.canBerthAt(miningStation)) {
+                beginBerthAt(miningStation, MINER_BERTH_SECONDS, this::onMinerBerthComplete);
+            } else {
+                beginNextMiningRun(false);
+            }
+        }
+    }
+
+    private void onMinerBerthComplete() {
+        beginNextMiningRun(true);
+        if (miningTarget == null && currentBehavior == Behavior.MINER_TRANSIT_STATION) {
+            beginBerthAt(miningStation, MINER_NO_ASTEROID_RETRY_SECONDS, this::onMinerBerthComplete);
+        }
+    }
+
+    private void updateMinerWeaponAiming(float deltaTime) {
+        if (!isMiningTargetValid()) {
+            updateWeaponAiming(deltaTime, null);
+            return;
+        }
+        updateWeaponAimingAtWorldPoint(deltaTime, miningTarget.getX(), miningTarget.getY());
+    }
+
+    private void tryFireMining(ProjectileManager projectileManager) {
+        if (projectileManager == null || !isMiningTargetValid()) {
+            return;
+        }
+        if (getDistanceToSquared(miningTarget) > miningFireRangeSquared) {
+            return;
+        }
+
+        for (ShipWeaponInstance w : weaponInstances) {
+            if (w.data == null || !w.data.minesAsteroids || w.fireCooldown > 0f) {
+                continue;
+            }
+
+            float aimDiff = Math.abs(CustomMathUtils.deltaDeg(
+                w.aimAngleDeg,
+                weaponAimAngleToward(w, miningTarget.getX(), miningTarget.getY())
+            ));
+            if (aimDiff > combatAimToleranceDegrees) {
+                continue;
+            }
+
+            spawnWeaponProjectile(projectileManager, w, null);
+            w.fireCooldown = w.data.fireInterval;
         }
     }
 
@@ -1415,13 +1654,15 @@ public class SpaceShip extends GameObject {
         } else if (militiaPatrol) {
             currentBehavior = Behavior.FLYING_AROUND_TARGET;
             resetPatrolRelocateTimer();
+        } else if (miner) {
+            beginNextMiningRun(true);
         } else {
             currentBehavior = Behavior.FLYING_AROUND_TARGET;
         }
     }
 
     private void updatePatrolOrCombat(float deltaTime, ProjectileManager projectileManager, Runnable idlePatrol) {
-        if (trader || (!militiaPatrol && !civilian && !pirate)) {
+        if (miner || trader || (!militiaPatrol && !civilian && !pirate)) {
             combatTarget = null;
             linedUpForShot = false;
             targetForwardSpeed = maxNormalSpeed;

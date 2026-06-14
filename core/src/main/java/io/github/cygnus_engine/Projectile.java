@@ -14,6 +14,8 @@ public class Projectile implements Pool.Poolable {
     public boolean homing;
     public GameObject homingTarget;
     public float homingTurnRateDegPerSec;
+    public boolean minesAsteroids;
+    public float miningDamage;
 
     @Override
     public void reset() {
@@ -27,5 +29,7 @@ public class Projectile implements Pool.Poolable {
         homing = false;
         homingTarget = null;
         homingTurnRateDegPerSec = 0f;
+        minesAsteroids = false;
+        miningDamage = 0f;
     }
 }

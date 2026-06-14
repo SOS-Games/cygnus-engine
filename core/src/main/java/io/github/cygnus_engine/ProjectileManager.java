@@ -1,5 +1,7 @@
 package io.github.cygnus_engine;
 
+import com.badlogic.gdx.math.Intersector;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.utils.Array;
@@ -7,6 +9,7 @@ import com.badlogic.gdx.utils.Pool;
 
 public class ProjectileManager {
     private final Array<Projectile> activeProjectiles = new Array<>();
+    private final Vector2 asteroidCenterScratch = new Vector2();
     private final Pool<Projectile> projectilePool = new Pool<>() {
         @Override
         protected Projectile newObject() {
@@ -23,7 +26,7 @@ public class ProjectileManager {
         float lifetime,
         float radius
     ) {
-        spawn(owner, x, y, angleDeg, speed, lifetime, radius, null, 0f);
+        spawn(owner, x, y, angleDeg, speed, lifetime, radius, null, 0f, false, 0f);
     }
 
     /**
@@ -40,6 +43,35 @@ public class ProjectileManager {
         GameObject homingTarget,
         float homingTurnRateDegPerSec
     ) {
+        spawn(owner, x, y, angleDeg, speed, lifetime, radius, homingTarget, homingTurnRateDegPerSec, false, 0f);
+    }
+
+    public void spawnMining(
+        SpaceShip owner,
+        float x,
+        float y,
+        float angleDeg,
+        float speed,
+        float lifetime,
+        float radius,
+        float miningDamage
+    ) {
+        spawn(owner, x, y, angleDeg, speed, lifetime, radius, null, 0f, true, miningDamage);
+    }
+
+    private void spawn(
+        SpaceShip owner,
+        float x,
+        float y,
+        float angleDeg,
+        float speed,
+        float lifetime,
+        float radius,
+        GameObject homingTarget,
+        float homingTurnRateDegPerSec,
+        boolean minesAsteroids,
+        float miningDamage
+    ) {
         Projectile projectile = projectilePool.obtain();
         projectile.owner = owner;
         projectile.position.set(x, y);
@@ -51,10 +83,12 @@ public class ProjectileManager {
         projectile.homingTarget = homingTarget;
         projectile.homingTurnRateDegPerSec = homingTurnRateDegPerSec > 0f ? homingTurnRateDegPerSec : 120f;
         projectile.homing = homingTarget != null;
+        projectile.minesAsteroids = minesAsteroids;
+        projectile.miningDamage = miningDamage;
         activeProjectiles.add(projectile);
     }
 
-    public void update(float deltaTime, Array<SpaceShip> ships) {
+    public void update(float deltaTime, Array<SpaceShip> ships, Array<GameObject> asteroids, Array<GameObject> destroyedAsteroidsOut) {
         for (int i = activeProjectiles.size - 1; i >= 0; i--) {
             Projectile projectile = activeProjectiles.get(i);
 
@@ -70,21 +104,25 @@ public class ProjectileManager {
             }
 
             if (projectile.alive) {
-                // todo - this tries to check a collision against every single ship in the loaded area
-                // the more ships and more bullets, the exponentially longer this will take
-                for (SpaceShip ship : ships) {
-                    if (!ship.isVisible() || ship == projectile.owner) {
-                        continue;
-                    }
-
-                    boolean hit = ship.projectileIntersectsHull(
-                        projectile.previousPosition,
-                        projectile.position,
-                        projectile.radius
-                    );
-                    if (hit) {
+                if (projectile.minesAsteroids) {
+                    if (tryHitAsteroid(projectile, asteroids, destroyedAsteroidsOut)) {
                         projectile.alive = false;
-                        break;
+                    }
+                } else {
+                    for (SpaceShip ship : ships) {
+                        if (!ship.isVisible() || ship == projectile.owner) {
+                            continue;
+                        }
+
+                        boolean hit = ship.projectileIntersectsHull(
+                            projectile.previousPosition,
+                            projectile.position,
+                            projectile.radius
+                        );
+                        if (hit) {
+                            projectile.alive = false;
+                            break;
+                        }
                     }
                 }
             }
@@ -94,6 +132,38 @@ public class ProjectileManager {
                 projectilePool.free(projectile);
             }
         }
+    }
+
+    private boolean tryHitAsteroid(
+        Projectile projectile,
+        Array<GameObject> asteroids,
+        Array<GameObject> destroyedAsteroidsOut
+    ) {
+        if (asteroids == null) {
+            return false;
+        }
+
+        for (GameObject asteroid : asteroids) {
+            if (asteroid == null || !asteroid.isMineable()) {
+                continue;
+            }
+
+            asteroidCenterScratch.set(asteroid.getX(), asteroid.getY());
+            if (!Intersector.intersectSegmentCircle(
+                projectile.previousPosition,
+                projectile.position,
+                asteroidCenterScratch,
+                asteroid.getSize() + projectile.radius
+            )) {
+                continue;
+            }
+
+            if (asteroid.applyMiningDamage(projectile.miningDamage) && destroyedAsteroidsOut != null) {
+                destroyedAsteroidsOut.add(asteroid);
+            }
+            return true;
+        }
+        return false;
     }
 
     private void applyHomingSteer(Projectile p, float deltaTime) {
@@ -126,7 +196,6 @@ public class ProjectileManager {
         float absDiff = Math.abs(diff);
 
         float maxRotationThisFrame = p.homingTurnRateDegPerSec * deltaTime;
-        
         float turn = direction * Math.min(absDiff, maxRotationThisFrame);
 
         p.velocity.set(speed, 0f).setAngleDeg(currentMovementAngle + turn);
@@ -134,7 +203,13 @@ public class ProjectileManager {
 
     public void render(ShapeRenderer shapeRenderer) {
         for (Projectile projectile : activeProjectiles) {
-            shapeRenderer.setColor(projectile.homing ? Color.ORANGE : Color.YELLOW);
+            if (projectile.minesAsteroids) {
+                shapeRenderer.setColor(0.55f, 0.95f, 1f, 1f);
+            } else if (projectile.homing) {
+                shapeRenderer.setColor(Color.ORANGE);
+            } else {
+                shapeRenderer.setColor(Color.YELLOW);
+            }
             shapeRenderer.circle(projectile.position.x, projectile.position.y, projectile.radius);
         }
     }

@@ -41,7 +41,9 @@ public final class AsteroidBeltGenerator {
             float py = cy + b * sinT + ny * offset;
             float size = MathUtils.lerp(belt.asteroidSizeMin, belt.asteroidSizeMax, MathUtils.random());
 
-            out.add(new GameObject(GameObject.Type.ASTEROID, px, py, size, belt.name));
+            GameObject asteroid = new GameObject(GameObject.Type.ASTEROID, px, py, size, belt.name);
+            asteroid.configureAsAsteroid(size * 12f);
+            out.add(asteroid);
         }
     }
 

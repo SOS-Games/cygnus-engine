@@ -33,6 +33,7 @@ public class GameWorld {
     private static final float SHIP_SPAWN_MAX_EXTRA_RADIUS = 220f;
     /** Fraction of spawned ships that run trade routes between orbit bodies. */
     private static final float TRADER_SHIP_FRACTION = 0.45f;
+    private static final int MINERS_PER_MINING_STATION = 2;
 
     private enum NpcShipRole {
         TRADER,
@@ -48,6 +49,8 @@ public class GameWorld {
     private Array<GameObject> gameObjects;
     /** Space stations ships may patrol, trade at, and spawn near (from star-system JSON). */
     private final Array<GameObject> orbitTargets = new Array<>();
+    private final Array<GameObject> mineableAsteroidsScratch = new Array<>();
+    private final Array<GameObject> destroyedAsteroidsScratch = new Array<>();
     private Array<SpaceShip> spaceShips;
     private float warpTimer;
     private float warpInterval;
@@ -174,12 +177,77 @@ public class GameWorld {
         for (int i = 0; i < 10; i++) {
             NpcShipRole role = pickNpcShipRole();
             GameObject spawnAnchor = pickSpawnAnchorForRole(role);
-            ShipData template = shipTemplates.get(MathUtils.random(shipTemplates.size - 1));
+            ShipData template = pickRandomNpcShipTemplate();
             float shipRadius = shipRadiusFromShipData(template);
             spawnShipNearOrbitTarget(i, spawnAnchor, template, shipRadius, role);
         }
 
+        spawnMinersForMiningStations();
         spawnPlayerShip();
+    }
+
+    private ShipData pickRandomNpcShipTemplate() {
+        if (shipTemplates.isEmpty()) {
+            return null;
+        }
+        for (int attempt = 0; attempt < shipTemplates.size * 2; attempt++) {
+            ShipData template = shipTemplates.get(MathUtils.random(shipTemplates.size - 1));
+            if (!"miner".equals(template.id)) {
+                return template;
+            }
+        }
+        return shipTemplates.first();
+    }
+
+    private void spawnMinersForMiningStations() {
+        ShipData minerTemplate = shipDataById.get("miner");
+        if (minerTemplate == null) {
+            return;
+        }
+
+        Array<GameObject> miningStations = collectStationsOfKind(StationKind.MINING);
+        int minerIndex = 0;
+        for (GameObject station : miningStations) {
+            for (int i = 0; i < MINERS_PER_MINING_STATION; i++) {
+                spawnMinerNearStation(minerIndex++, station, minerTemplate);
+            }
+        }
+    }
+
+    private void spawnMinerNearStation(int index, GameObject station, ShipData template) {
+        float shipRadius = shipRadiusFromShipData(template);
+        float angleDeg = MathUtils.random(0f, 360f);
+        float minDist = station.getSize() + shipRadius + SHIP_SPAWN_MIN_CLEARANCE;
+        float maxDist = minDist + SHIP_SPAWN_MAX_EXTRA_RADIUS;
+        float dist = MathUtils.random(minDist, maxDist);
+        float x = station.getX() + MathUtils.cosDeg(angleDeg) * dist;
+        float y = station.getY() + MathUtils.sinDeg(angleDeg) * dist;
+
+        SpaceShip ship = new SpaceShip(
+            x,
+            y,
+            shipRadius,
+            "Miner " + (index + 1) + " (" + template.id + ")",
+            station,
+            template.speed
+        );
+        ship.configureFromShipData(template);
+        ship.setHullSprite(createHullSprite(template));
+        ship.configureWeaponInstances(buildWeaponInstances(template));
+        ship.configureAsMiner(station);
+
+        spaceShips.add(ship);
+        gameObjects.add(ship);
+        GameUtils.addSpaceShip(ship);
+    }
+
+    private void refreshMineableAsteroids() {
+        mineableAsteroidsScratch.clear();
+        for (GameObject obj : gameObjects) {
+            if (obj.isMineable()) {
+                mineableAsteroidsScratch.add(obj);
+            }
+        }
     }
 
     private void addOrbitTarget(GameObject obj) {
@@ -383,7 +451,7 @@ public class GameWorld {
         }
         for (int attempt = 0; attempt < spaceShips.size; attempt++) {
             SpaceShip ship = spaceShips.get(MathUtils.random(spaceShips.size - 1));
-            if (!ship.isPirate() && !ship.isPlayerControlled()) {
+            if (!ship.isPirate() && !ship.isPlayerControlled() && !ship.isMiner()) {
                 return ship;
             }
         }
@@ -520,11 +588,27 @@ public class GameWorld {
     }
     
     public void update(float deltaTime) {
+        refreshMineableAsteroids();
+
         // Update space ships (they handle their own behavior)
         for (SpaceShip ship : spaceShips) {
+            if (ship.isMiner()) {
+                ship.setNearbyAsteroids(mineableAsteroidsScratch);
+            }
             ship.update(deltaTime, projectileManager);
         }
-        projectileManager.update(deltaTime, spaceShips);
+
+        destroyedAsteroidsScratch.clear();
+        projectileManager.update(
+            deltaTime,
+            spaceShips,
+            mineableAsteroidsScratch,
+            destroyedAsteroidsScratch
+        );
+        for (GameObject destroyed : destroyedAsteroidsScratch) {
+            gameObjects.removeValue(destroyed, true);
+            mineableAsteroidsScratch.removeValue(destroyed, true);
+        }
         engineTrailRenderer.update(deltaTime, spaceShips);
         
         // Update other game objects
@@ -805,6 +889,8 @@ public class GameWorld {
                 shapeRenderer.setColor(0.35f, 0.55f, 1f, 0.9f);
             } else if (ship.isCivilian()) {
                 shapeRenderer.setColor(0.55f, 0.9f, 0.45f, 0.9f);
+            } else if (ship.isMiner()) {
+                shapeRenderer.setColor(0.95f, 0.78f, 0.25f, 0.9f);
             } else if (ship.isPirate()) {
                 shapeRenderer.setColor(1f, 0.3f, 0.3f, 0.9f);
             } else {
