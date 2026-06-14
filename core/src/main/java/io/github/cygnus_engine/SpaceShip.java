@@ -115,9 +115,19 @@ public class SpaceShip extends GameObject {
     private float warpTimer = 0f; // Timer for warp effects
     private static final float WARP_OUT_RAMP_SECONDS = 2f;
     private static final float WARP_OUT_CRUISE_SECONDS = 2f;
-    private static final float TRADER_DOCK_SECONDS = 4f;
     private static final float TRADER_ARRIVAL_PADDING = 20f;
     private static final float TRADER_ROUTE_SPEED_FRACTION = 0.9f;
+    private static final float DEFAULT_BERTH_SECONDS = 4f;
+    private static final float BERTH_APPROACH_SPEED_FRACTION = 0.9f;
+    private static final float BERTH_SLOW_ZONE_RADIUS = 55f;
+    private static final float BERTH_AUTO_DOCK_RADIUS = 42f;
+    private static final float BERTH_AUTO_DOCK_PULL_GAIN = 2.4f;
+    private static final float BERTH_AUTO_DOCK_MIN_SPEED = 8f;
+    private static final float BERTH_AUTO_DOCK_MAX_SPEED = 48f;
+    private static final float BERTH_AUTO_DOCK_ROTATION_MULTIPLIER = 1.5f;
+    private static final float BERTH_ARRIVED_DISTANCE = 2.5f;
+    private static final float BERTH_FINAL_SPEED_FRACTION = 0.15f;
+    private static final float BERTH_ALIGN_TOLERANCE_DEG = 10f;
     private static final float MILITIA_RELOCATE_MIN_SECONDS = 10f;
     private static final float MILITIA_RELOCATE_MAX_SECONDS = 30f;
     private static final float MILITIA_TRANSIT_SPEED_FRACTION = 0.85f;
@@ -127,6 +137,7 @@ public class SpaceShip extends GameObject {
     private boolean trader = false;
     private boolean militiaPatrol = false;
     private boolean pirate = false;
+    private boolean civilian = false;
     private boolean playerControlled = false;
     private float playerForwardInput = 0f;
     private float playerStrafeInput = 0f;
@@ -137,7 +148,13 @@ public class SpaceShip extends GameObject {
     private final Array<GameObject> tradeRoute = new Array<>();
     private final Array<GameObject> patrolAnchors = new Array<>();
     private GameObject tradeDestination;
-    private float tradeDockTimer = 0f;
+    private GameObject berthHost;
+    private StationBerth.Cardinal berthSide;
+    private final Vector2 berthPoint = new Vector2();
+    private float berthTimer = 0f;
+    private float berthDurationSeconds = DEFAULT_BERTH_SECONDS;
+    private float berthApproachSpeedFraction = BERTH_APPROACH_SPEED_FRACTION;
+    private Runnable berthCompleteCallback;
     private float patrolRelocateTimer = 0f;
     private float patrolRelocateInterval = 45f;
 
@@ -157,7 +174,9 @@ public class SpaceShip extends GameObject {
         FLYING_TO_TARGET,
         FLYING_AROUND_TARGET,
         TRADER_TRANSIT,
-        TRADER_DOCKED,
+        DOCKING_APPROACH,
+        DOCKING_AUTO,
+        DOCKED,
         MILITIA_TRANSIT,
         PLAYER_CONTROLLED,
         WARPING_OUT,
@@ -261,14 +280,21 @@ public class SpaceShip extends GameObject {
         trader = true;
         militiaPatrol = false;
         pirate = false;
+        civilian = false;
         playerControlled = false;
         tradeRoute.clear();
         if (stops != null) {
-            tradeRoute.addAll(stops);
+            for (GameObject stop : stops) {
+                if (stop != null && stop.isInteractable()) {
+                    tradeRoute.add(stop);
+                }
+            }
         }
         combatTarget = null;
         pickNextTradeDestination();
-        currentBehavior = Behavior.TRADER_TRANSIT;
+        if (!isBerthing()) {
+            currentBehavior = Behavior.TRADER_TRANSIT;
+        }
     }
 
     /** Militia patrol one anchor at a time and occasionally relocate to another body. */
@@ -276,10 +302,15 @@ public class SpaceShip extends GameObject {
         trader = false;
         militiaPatrol = true;
         pirate = false;
+        civilian = false;
         playerControlled = false;
         patrolAnchors.clear();
         if (anchors != null) {
-            patrolAnchors.addAll(anchors);
+            for (GameObject anchor : anchors) {
+                if (anchor != null && anchor.isInteractable()) {
+                    patrolAnchors.add(anchor);
+                }
+            }
         }
         combatTarget = null;
         resetPatrolRelocateTimer();
@@ -291,6 +322,7 @@ public class SpaceShip extends GameObject {
         trader = false;
         militiaPatrol = false;
         pirate = true;
+        civilian = false;
         playerControlled = false;
         if (anchor != null) {
             orbitTarget = anchor;
@@ -298,10 +330,25 @@ public class SpaceShip extends GameObject {
         combatTarget = null;
     }
 
+    /** Civilians orbit one anchor locally and engage pirates that enter range. */
+    public void configureAsCivilian(GameObject anchor) {
+        trader = false;
+        militiaPatrol = false;
+        pirate = false;
+        civilian = true;
+        playerControlled = false;
+        if (anchor != null) {
+            orbitTarget = anchor;
+        }
+        combatTarget = null;
+        currentBehavior = Behavior.FLYING_AROUND_TARGET;
+    }
+
     public void configureAsPlayer(GameObject anchor) {
         trader = false;
         militiaPatrol = false;
         pirate = false;
+        civilian = false;
         playerControlled = true;
         if (anchor != null) {
             orbitTarget = anchor;
@@ -347,6 +394,10 @@ public class SpaceShip extends GameObject {
             playerTarget = null;
             return;
         }
+        if (target != null && !target.isInteractable()) {
+            playerTarget = null;
+            return;
+        }
         playerTarget = target;
     }
 
@@ -364,6 +415,8 @@ public class SpaceShip extends GameObject {
             if (!targetShip.isVisible() || !GameUtils.isRegisteredShip(targetShip)) {
                 playerTarget = null;
             }
+        } else if (!playerTarget.isInteractable()) {
+            playerTarget = null;
         }
     }
 
@@ -377,6 +430,10 @@ public class SpaceShip extends GameObject {
 
     public boolean isPirate() {
         return pirate;
+    }
+
+    public boolean isCivilian() {
+        return civilian;
     }
 
     /** Place off-screen relative to {@code anchor} and begin the warp-in deceleration pass. */
@@ -413,6 +470,60 @@ public class SpaceShip extends GameObject {
 
     public GameObject getTradeDestination() {
         return tradeDestination;
+    }
+
+    /** Begin approach to a cardinal berth on a station; {@code onComplete} runs after the stay duration. */
+    public void beginBerthAt(GameObject station, float staySeconds, Runnable onComplete) {
+        beginBerthAt(station, staySeconds, BERTH_APPROACH_SPEED_FRACTION, onComplete);
+    }
+
+    public void beginBerthAt(
+        GameObject station,
+        float staySeconds,
+        float approachSpeedFraction,
+        Runnable onComplete
+    ) {
+        if (!StationBerth.canBerthAt(station)) {
+            return;
+        }
+
+        releaseBerth();
+        berthHost = station;
+        berthDurationSeconds = staySeconds;
+        berthApproachSpeedFraction = approachSpeedFraction;
+        berthCompleteCallback = onComplete;
+        berthSide = StationBerth.assignBerth(station, this);
+        if (berthSide == null) {
+            berthHost = null;
+            berthCompleteCallback = null;
+            return;
+        }
+        StationBerth.writeBerthWorldPosition(station, berthSide, getSize(), berthPoint);
+        berthTimer = 0f;
+        currentBehavior = Behavior.DOCKING_APPROACH;
+    }
+
+    public void releaseBerth() {
+        if (berthHost != null) {
+            StationBerth.releaseShip(berthHost, this);
+        }
+        berthHost = null;
+        berthSide = null;
+        berthCompleteCallback = null;
+    }
+
+    public boolean isBerthingAt(GameObject station) {
+        return station != null && station == berthHost && isBerthing();
+    }
+
+    public GameObject getBerthHost() {
+        return berthHost;
+    }
+
+    public boolean isBerthing() {
+        return currentBehavior == Behavior.DOCKING_APPROACH
+            || currentBehavior == Behavior.DOCKING_AUTO
+            || currentBehavior == Behavior.DOCKED;
     }
 
     /** Standoff orbit radius/band and fire range from equipped weapon projectile travel distance. */
@@ -559,8 +670,16 @@ public class SpaceShip extends GameObject {
                 updateTraderTransit();
                 updateWeaponAiming(deltaTime, null);
                 break;
-            case TRADER_DOCKED:
-                updateTraderDocked(deltaTime);
+            case DOCKING_APPROACH:
+                updateBerthApproach();
+                updateWeaponAiming(deltaTime, null);
+                break;
+            case DOCKING_AUTO:
+                updateAutoDock(deltaTime);
+                updateWeaponAiming(deltaTime, null);
+                break;
+            case DOCKED:
+                updateBerthed(deltaTime);
                 updateWeaponAiming(deltaTime, null);
                 break;
             case MILITIA_TRANSIT:
@@ -581,9 +700,11 @@ public class SpaceShip extends GameObject {
                 break;
         }
 
-        updateRotation(deltaTime);
-        accelerateTowardTargets(deltaTime);
-        updatePosition(deltaTime);
+        if (currentBehavior != Behavior.DOCKING_AUTO) {
+            updateRotation(deltaTime);
+            accelerateTowardTargets(deltaTime);
+            updatePosition(deltaTime);
+        }
         refreshWorldTransformAndMountCaches();
     }
 
@@ -901,37 +1022,179 @@ public class SpaceShip extends GameObject {
             }
         }
 
+        if (tradeDestination.getType() == GameObject.Type.SPACE_STATION) {
+            if (!isBerthing()) {
+                beginBerthAt(tradeDestination, DEFAULT_BERTH_SECONDS, this::pickNextTradeDestination);
+            }
+            return;
+        }
+
         targetAngle = getAngleToTarget(tradeDestination.getX(), tradeDestination.getY());
         targetForwardSpeed = maxNormalSpeed * TRADER_ROUTE_SPEED_FRACTION;
         targetStrafeSpeed = 0f;
 
         float arriveDist = tradeDestination.getSize() + getSize() + TRADER_ARRIVAL_PADDING;
         if (getDistanceToSquared(tradeDestination) <= arriveDist * arriveDist) {
-            onTraderArrival();
-        }
-    }
-
-    private void updateTraderDocked(float deltaTime) {
-        targetForwardSpeed = 0f;
-        targetStrafeSpeed = 0f;
-        tradeDockTimer += deltaTime;
-        if (tradeDockTimer >= TRADER_DOCK_SECONDS) {
             pickNextTradeDestination();
         }
     }
 
-    private void onTraderArrival() {
-        if (tradeDestination != null && tradeDestination.getType() == GameObject.Type.SPACE_STATION) {
-            currentBehavior = Behavior.TRADER_DOCKED;
-            tradeDockTimer = 0f;
-            targetForwardSpeed = 0f;
-            targetStrafeSpeed = 0f;
+    private void updateBerthApproach() {
+        if (!StationBerth.canBerthAt(berthHost)) {
+            endBerthAndResume();
             return;
         }
-        pickNextTradeDestination();
+
+        if (berthSide == null) {
+            berthSide = StationBerth.assignBerth(berthHost, this);
+            if (berthSide == null) {
+                endBerthAndResume();
+                return;
+            }
+        }
+        StationBerth.writeBerthWorldPosition(berthHost, berthSide, getSize(), berthPoint);
+
+        float dx = berthPoint.x - getX();
+        float dy = berthPoint.y - getY();
+        float dist = (float) Math.sqrt(dx * dx + dy * dy);
+        targetStrafeSpeed = 0f;
+
+        if (dist <= BERTH_AUTO_DOCK_RADIUS) {
+            currentBehavior = Behavior.DOCKING_AUTO;
+            return;
+        }
+
+        targetAngle = getAngleToTarget(berthPoint.x, berthPoint.y);
+        if (dist <= BERTH_SLOW_ZONE_RADIUS) {
+            float zoneT = dist / BERTH_SLOW_ZONE_RADIUS;
+            targetForwardSpeed = maxNormalSpeed * BERTH_FINAL_SPEED_FRACTION * MathUtils.clamp(zoneT, 0.25f, 1f);
+        } else {
+            targetForwardSpeed = maxNormalSpeed * berthApproachSpeedFraction;
+        }
+    }
+
+    /** Magnetic pull into berth; bypasses forward/strafe flight so ships cannot overshoot. */
+    private void updateAutoDock(float deltaTime) {
+        if (!StationBerth.canBerthAt(berthHost)) {
+            endBerthAndResume();
+            return;
+        }
+
+        if (berthSide == null) {
+            berthSide = StationBerth.assignBerth(berthHost, this);
+            if (berthSide == null) {
+                endBerthAndResume();
+                return;
+            }
+        }
+        StationBerth.writeBerthWorldPosition(berthHost, berthSide, getSize(), berthPoint);
+
+        float berthFacing = StationBerth.berthFacingAngleDeg(berthHost, berthPoint);
+        targetAngle = berthFacing;
+        updateRotationTowardTarget(deltaTime, BERTH_AUTO_DOCK_ROTATION_MULTIPLIER);
+
+        float dx = berthPoint.x - getX();
+        float dy = berthPoint.y - getY();
+        float distSq = dx * dx + dy * dy;
+        float angleDiff = Math.abs(CustomMathUtils.angleDifference(getRotation(), berthFacing));
+
+        if (distSq <= BERTH_ARRIVED_DISTANCE * BERTH_ARRIVED_DISTANCE
+            && angleDiff <= BERTH_ALIGN_TOLERANCE_DEG) {
+            snapToBerth(berthFacing);
+            return;
+        }
+
+        if (distSq <= 0.0001f) {
+            snapToBerth(berthFacing);
+            return;
+        }
+
+        float dist = (float) Math.sqrt(distSq);
+        float pullSpeed = MathUtils.clamp(
+            dist * BERTH_AUTO_DOCK_PULL_GAIN,
+            BERTH_AUTO_DOCK_MIN_SPEED,
+            BERTH_AUTO_DOCK_MAX_SPEED
+        );
+        float invDist = 1f / dist;
+        float pullX = dx * invDist * pullSpeed;
+        float pullY = dy * invDist * pullSpeed;
+
+        prevX = getX();
+        prevY = getY();
+        setX(getX() + pullX * deltaTime);
+        setY(getY() + pullY * deltaTime);
+
+        currentSpeed = 0f;
+        strafeSpeed = 0f;
+        targetForwardSpeed = 0f;
+        targetStrafeSpeed = 0f;
+        if (deltaTime > 0f) {
+            velocityX = pullX;
+            velocityY = pullY;
+        }
+    }
+
+    private void snapToBerth(float berthFacing) {
+        setX(berthPoint.x);
+        setY(berthPoint.y);
+        setRotation(berthFacing);
+        targetAngle = berthFacing;
+        currentSpeed = 0f;
+        strafeSpeed = 0f;
+        targetForwardSpeed = 0f;
+        targetStrafeSpeed = 0f;
+        velocityX = 0f;
+        velocityY = 0f;
+        currentBehavior = Behavior.DOCKED;
+        berthTimer = 0f;
+    }
+
+    private void updateBerthed(float deltaTime) {
+        if (StationBerth.canBerthAt(berthHost) && berthSide != null) {
+            StationBerth.writeBerthWorldPosition(berthHost, berthSide, getSize(), berthPoint);
+            setX(berthPoint.x);
+            setY(berthPoint.y);
+            targetAngle = StationBerth.berthFacingAngleDeg(berthHost, berthPoint);
+            setRotation(targetAngle);
+        }
+        currentSpeed = 0f;
+        strafeSpeed = 0f;
+        targetForwardSpeed = 0f;
+        targetStrafeSpeed = 0f;
+        velocityX = 0f;
+        velocityY = 0f;
+        berthTimer += deltaTime;
+        if (berthTimer >= berthDurationSeconds) {
+            completeBerthStay();
+        }
+    }
+
+    private void completeBerthStay() {
+        Runnable callback = berthCompleteCallback;
+        releaseBerth();
+        if (callback != null) {
+            callback.run();
+        } else {
+            endBerthAndResume();
+        }
+    }
+
+    private void endBerthAndResume() {
+        releaseBerth();
+        if (trader) {
+            currentBehavior = Behavior.TRADER_TRANSIT;
+        } else if (militiaPatrol) {
+            currentBehavior = Behavior.FLYING_AROUND_TARGET;
+        } else if (playerControlled) {
+            currentBehavior = Behavior.PLAYER_CONTROLLED;
+        } else {
+            currentBehavior = Behavior.FLYING_AROUND_TARGET;
+        }
     }
 
     private void pickNextTradeDestination() {
+        releaseBerth();
+
         if (tradeRoute.size == 0) {
             tradeDestination = null;
             return;
@@ -951,8 +1214,12 @@ public class SpaceShip extends GameObject {
         tradeDestination = next;
         orbitTarget = tradeDestination;
         targetAngle = getAngleToTarget(tradeDestination.getX(), tradeDestination.getY());
-        currentBehavior = Behavior.TRADER_TRANSIT;
-        tradeDockTimer = 0f;
+
+        if (StationBerth.canBerthAt(tradeDestination)) {
+            beginBerthAt(tradeDestination, DEFAULT_BERTH_SECONDS, this::pickNextTradeDestination);
+        } else {
+            currentBehavior = Behavior.TRADER_TRANSIT;
+        }
     }
 
     private void resetPatrolRelocateTimer() {
@@ -1087,7 +1354,7 @@ public class SpaceShip extends GameObject {
     }
 
     private void updatePatrolOrCombat(float deltaTime, ProjectileManager projectileManager, Runnable idlePatrol) {
-        if (trader || (!militiaPatrol && !pirate)) {
+        if (trader || (!militiaPatrol && !civilian && !pirate)) {
             combatTarget = null;
             linedUpForShot = false;
             targetForwardSpeed = maxNormalSpeed;
@@ -1133,7 +1400,7 @@ public class SpaceShip extends GameObject {
     }
 
     private GameObject findPreferredCombatTarget() {
-        if (militiaPatrol) {
+        if (militiaPatrol || civilian) {
             return GameUtils.getClosestShipWithinRange(
                 detectCombatDistanceSquared,
                 getX(),
@@ -1158,7 +1425,7 @@ public class SpaceShip extends GameObject {
                 getX(),
                 getY(),
                 this,
-                SpaceShip::isMilitiaPatrol
+                ship -> ship.isMilitiaPatrol() || ship.isCivilian()
             );
         }
         return null;
@@ -1172,11 +1439,11 @@ public class SpaceShip extends GameObject {
         if (trader) {
             return false;
         }
-        if (militiaPatrol) {
+        if (militiaPatrol || civilian) {
             return targetShip.isPirate();
         }
         if (pirate) {
-            return targetShip.isTrader() || targetShip.isMilitiaPatrol();
+            return targetShip.isTrader() || targetShip.isMilitiaPatrol() || targetShip.isCivilian();
         }
         return false;
     }
@@ -1421,21 +1688,19 @@ public class SpaceShip extends GameObject {
     }
 
     private void updateRotation(float deltaTime) {
+        updateRotationTowardTarget(deltaTime, 1f);
+    }
+
+    private void updateRotationTowardTarget(float deltaTime, float speedMultiplier) {
         targetAngle = CustomMathUtils.normalizeAngle360(targetAngle);
-        
+
         float currentRotation = getRotation();
-
         float angleDiff = CustomMathUtils.angleDifference(targetAngle, currentRotation);
+        float maxRotationThisFrame = maneuverability * speedMultiplier * deltaTime;
 
-        // Calculate the maximum amount we CAN rotate this frame
-        float maxRotationThisFrame = maneuverability * deltaTime;
-
-        // Check if we are already close enough to "snap" 
         if (Math.abs(angleDiff) <= maxRotationThisFrame) {
-            // This prevents the ship from vibrating back and forth over the target line
             setRotation(targetAngle);
         } else {
-            // Otherwise, rotate at FULL speed in the correct direction
             float direction = Math.signum(angleDiff);
             setRotation(currentRotation + (direction * maxRotationThisFrame));
         }
@@ -1460,6 +1725,7 @@ public class SpaceShip extends GameObject {
 
     public void triggerWarpOut() {
         if (currentBehavior != Behavior.WARPING_OUT && currentBehavior != Behavior.WARPED_OUT && currentBehavior != Behavior.WARPING_IN) {
+            releaseBerth();
             currentBehavior = Behavior.WARPING_OUT;
             warpTimer = 0f;
             //System.out.println("Warping out, maxNormalSpeed , warpSpeed: " + maxNormalSpeed + " , " + warpSpeed);

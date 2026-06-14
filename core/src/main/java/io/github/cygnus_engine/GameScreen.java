@@ -198,7 +198,7 @@ public class GameScreen {
         SpaceShip player = gameWorld.getPlayerShip();
         if (player != null) {
             GameObject locked = player.getPlayerTarget();
-            if (locked != null) {
+            if (locked != null && locked.isInteractable()) {
                 return locked;
             }
         }
@@ -273,7 +273,7 @@ public class GameScreen {
             if (hoverTarget == player) {
                 hoverTarget = null;
             }
-            if (hoverTarget != null) {
+            if (hoverTarget != null && hoverTarget.isInteractable()) {
                 player.setPlayerTarget(hoverTarget);
             }
         }

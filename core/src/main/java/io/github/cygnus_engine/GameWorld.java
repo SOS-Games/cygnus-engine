@@ -33,6 +33,12 @@ public class GameWorld {
     private static final float SHIP_SPAWN_MAX_EXTRA_RADIUS = 220f;
     /** Fraction of spawned ships that run trade routes between orbit bodies. */
     private static final float TRADER_SHIP_FRACTION = 0.66f;
+
+    private enum NpcShipRole {
+        TRADER,
+        MILITIA,
+        CIVILIAN
+    }
     private static final float PIRATE_WARP_IN_MIN_SECONDS = 5f;
     private static final float PIRATE_WARP_IN_MAX_SECONDS = 15f;
     private static final int MAX_ACTIVE_PIRATES = 6;
@@ -40,7 +46,7 @@ public class GameWorld {
     private ShapeRenderer shapeRenderer;
     private OrthographicCamera camera;
     private Array<GameObject> gameObjects;
-    /** Planets and stations ships may patrol around (from star-system JSON). */
+    /** Space stations ships may patrol, trade at, and spawn near (from star-system JSON). */
     private final Array<GameObject> orbitTargets = new Array<>();
     private Array<SpaceShip> spaceShips;
     private float warpTimer;
@@ -142,7 +148,7 @@ public class GameWorld {
         if (systemLayout != null && systemLayout.bodies != null && !systemLayout.bodies.isEmpty()) {
             loadBodiesFromStarSystem(systemLayout);
         } else {
-            addOrbitTarget(new GameObject(
+            addBackgroundBody(new GameObject(
                 GameObject.Type.PLANET,
                 -WORLD_WIDTH * 0.25f,
                 WORLD_HEIGHT * 0.5f,
@@ -168,8 +174,8 @@ public class GameWorld {
             GameObject orbitTarget = pickRandomOrbitTarget();
             ShipData template = shipTemplates.get(MathUtils.random(shipTemplates.size - 1));
             float shipRadius = shipRadiusFromShipData(template);
-            boolean asTrader = MathUtils.random() < TRADER_SHIP_FRACTION && orbitTargets.size >= 2;
-            spawnShipNearOrbitTarget(i, orbitTarget, template, shipRadius, asTrader);
+            NpcShipRole role = pickNpcShipRole();
+            spawnShipNearOrbitTarget(i, orbitTarget, template, shipRadius, role);
         }
 
         spawnPlayerShip();
@@ -180,8 +186,20 @@ public class GameWorld {
         orbitTargets.add(obj);
     }
 
+    /** Scenery only: drawn and updated, but not an orbit anchor or mouse target. */
+    private void addBackgroundBody(GameObject obj) {
+        gameObjects.add(obj);
+    }
+
     private GameObject pickRandomOrbitTarget() {
         return orbitTargets.get(MathUtils.random(orbitTargets.size - 1));
+    }
+
+    private NpcShipRole pickNpcShipRole() {
+        if (orbitTargets.size >= 2 && MathUtils.random() < TRADER_SHIP_FRACTION) {
+            return NpcShipRole.TRADER;
+        }
+        return MathUtils.randomBoolean() ? NpcShipRole.MILITIA : NpcShipRole.CIVILIAN;
     }
 
     private void spawnShipNearOrbitTarget(
@@ -189,7 +207,7 @@ public class GameWorld {
         GameObject orbitTarget,
         ShipData template,
         float shipRadius,
-        boolean asTrader
+        NpcShipRole role
     ) {
         float angleDeg = MathUtils.random(0f, 360f);
         float minDist = orbitTarget.getSize() + shipRadius + SHIP_SPAWN_MIN_CLEARANCE;
@@ -198,7 +216,11 @@ public class GameWorld {
         float x = orbitTarget.getX() + MathUtils.cosDeg(angleDeg) * dist;
         float y = orbitTarget.getY() + MathUtils.sinDeg(angleDeg) * dist;
 
-        String rolePrefix = asTrader ? "Trader" : "Militia";
+        String rolePrefix = switch (role) {
+            case TRADER -> "Trader";
+            case MILITIA -> "Militia";
+            case CIVILIAN -> "Civilian";
+        };
         SpaceShip ship = new SpaceShip(
             x,
             y,
@@ -210,10 +232,10 @@ public class GameWorld {
         ship.configureFromShipData(template);
         ship.setHullSprite(createHullSprite(template));
         ship.configureWeaponInstances(buildWeaponInstances(template));
-        if (asTrader) {
-            ship.configureAsTrader(orbitTargets);
-        } else {
-            ship.configureAsMilitiaPatrol(orbitTargets);
+        switch (role) {
+            case TRADER -> ship.configureAsTrader(orbitTargets);
+            case MILITIA -> ship.configureAsMilitiaPatrol(orbitTargets);
+            case CIVILIAN -> ship.configureAsCivilian(orbitTarget);
         }
 
         spaceShips.add(ship);
@@ -323,11 +345,11 @@ public class GameWorld {
             return;
         }
         addOrbitTarget(new GameObject(
-            GameObject.Type.PLANET,
-            -WORLD_WIDTH * 0.25f,
+            GameObject.Type.SPACE_STATION,
+            WORLD_WIDTH * 1.25f,
             WORLD_HEIGHT * 0.5f,
-            40f,
-            "Planet"
+            50f,
+            "Space Station"
         ));
     }
 
@@ -339,14 +361,19 @@ public class GameWorld {
             GameObject.Type type = body.type == StarSystemBody.Kind.SPACE_STATION
                 ? GameObject.Type.SPACE_STATION
                 : GameObject.Type.PLANET;
-            addOrbitTarget(new GameObject(type, body.x, body.y, body.size, body.name));
+            GameObject obj = new GameObject(type, body.x, body.y, body.size, body.name);
+            if (type == GameObject.Type.PLANET) {
+                addBackgroundBody(obj);
+            } else {
+                addOrbitTarget(obj);
+            }
         }
 
         ensureOrbitTargetsNonEmpty();
     }
 
-    private GameObject firstOrbitTargetOfType(GameObject.Type type) {
-        for (GameObject obj : orbitTargets) {
+    private GameObject firstBodyOfType(GameObject.Type type) {
+        for (GameObject obj : gameObjects) {
             if (obj.getType() == type) {
                 return obj;
             }
@@ -696,6 +723,8 @@ public class GameWorld {
                 shapeRenderer.setColor(1f, 1f, 1f, 0.9f);
             } else if (ship.isMilitiaPatrol()) {
                 shapeRenderer.setColor(0.35f, 0.55f, 1f, 0.9f);
+            } else if (ship.isCivilian()) {
+                shapeRenderer.setColor(0.55f, 0.9f, 0.45f, 0.9f);
             } else if (ship.isPirate()) {
                 shapeRenderer.setColor(1f, 0.3f, 0.3f, 0.9f);
             } else {
@@ -731,7 +760,7 @@ public class GameWorld {
         }
     }
 
-    /** Short line from the camera-pinned ship toward its patrol orbit target (planet/station). */
+    /** Short line from the camera-pinned ship toward its patrol orbit target (station). */
     private void drawPinnedOrbitTargetIndicator() {
         SpaceShip followShip = getCameraFollowShip();
         if (followShip == null || followShip.isPlayerControlled()) {
@@ -824,7 +853,7 @@ public class GameWorld {
         // Check objects in reverse order (top-most first)
         for (int i = gameObjects.size - 1; i >= 0; i--) {
             GameObject obj = gameObjects.get(i);
-            if (obj.containsPoint(x, y)) {
+            if (obj.isInteractable() && obj.containsPoint(x, y)) {
                 return obj;
             }
         }
@@ -841,13 +870,14 @@ public class GameWorld {
     }
 
     public GameObject getPlanet() {
-        return firstOrbitTargetOfType(GameObject.Type.PLANET);
+        return firstBodyOfType(GameObject.Type.PLANET);
     }
     
     public GameObject getSpaceStation() {
-        return firstOrbitTargetOfType(GameObject.Type.SPACE_STATION);
+        return firstBodyOfType(GameObject.Type.SPACE_STATION);
     }
 
+    /** Stations only; planets are background scenery and are not orbit anchors. */
     public Array<GameObject> getOrbitTargets() {
         return orbitTargets;
     }

@@ -43,6 +43,9 @@ public class GameObject {
     }
     
     public boolean containsPoint(float pointX, float pointY) {
+        if (!isInteractable()) {
+            return false;
+        }
         double distance;
         switch (type) {
             case PLANET:
@@ -96,6 +99,11 @@ public class GameObject {
     public float getRotation() { return rotation; }
     public float getSize() { return size; }
     public String getName() { return name; }
+
+    /** Planets are rendered as scenery and excluded from orbit AI and player interaction. */
+    public boolean isInteractable() {
+        return type != Type.PLANET;
+    }
     
     // Setters for position (useful for wrapping)
     public void setX(float x) { this.x = x; }
