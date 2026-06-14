@@ -1,6 +1,5 @@
 package io.github.cygnus_engine;
 
-import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
 
 public final class ShipDataIO {
@@ -56,10 +55,7 @@ public final class ShipDataIO {
         if (targetJsonFile == null) throw new IllegalArgumentException("targetJsonFile must not be null");
 
         data.normalizeOuterBounds();
-        targetJsonFile.parent().mkdirs();
-        String text = ModJson.newJson().prettyPrint(data);
-        targetJsonFile.writeString(text, false, "UTF-8");
-        Gdx.app.log("ShipDataIO", "Saved ship data to " + targetJsonFile.path());
+        ModJson.writePrettyFile(data, targetJsonFile, "ShipDataIO");
     }
 }
 

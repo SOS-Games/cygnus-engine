@@ -104,10 +104,7 @@ public final class WeaponDataIO {
     public static void save(WeaponData data, FileHandle targetJsonFile) {
         if (data == null) throw new IllegalArgumentException("WeaponData must not be null");
         if (targetJsonFile == null) throw new IllegalArgumentException("targetJsonFile must not be null");
-        targetJsonFile.parent().mkdirs();
-        String text = ModJson.newJson().prettyPrint(data);
-        targetJsonFile.writeString(text, false, "UTF-8");
-        Gdx.app.log("WeaponDataIO", "Saved weapon data to " + targetJsonFile.path());
+        ModJson.writePrettyFile(data, targetJsonFile, "WeaponDataIO");
     }
 
     public static FileHandle resolveTextureFile(String texturePath) {

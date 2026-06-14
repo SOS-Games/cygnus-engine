@@ -1,6 +1,5 @@
 package io.github.cygnus_engine;
 
-import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -29,10 +28,7 @@ public final class StarSystemDataIO {
             throw new IllegalArgumentException("targetJsonFile must not be null");
         }
         data.normalize();
-        targetJsonFile.parent().mkdirs();
-        String text = ModJson.newJson().prettyPrint(data);
-        targetJsonFile.writeString(text, false, "UTF-8");
-        Gdx.app.log("StarSystemDataIO", "Saved star system to " + targetJsonFile.path());
+        ModJson.writePrettyFile(data, targetJsonFile, "StarSystemDataIO");
     }
 
     public static List<FileHandle> collectSystemJsonFiles() {

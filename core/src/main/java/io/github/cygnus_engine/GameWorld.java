@@ -13,6 +13,8 @@ import com.badlogic.gdx.utils.ObjectMap;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.Gdx;
 
+import java.util.function.Consumer;
+
 public class GameWorld {
     private static final float WORLD_WIDTH = 800f;
     private static final float WORLD_HEIGHT = 600f;
@@ -178,6 +180,28 @@ public class GameWorld {
         gameObjects.add(ship);
         GameUtils.addSpaceShip(ship);
     }
+
+    private SpaceShip spawnConfiguredShipNear(
+        GameObject anchor,
+        ShipData template,
+        String name,
+        Consumer<SpaceShip> configure
+    ) {
+        float shipRadius = shipRadiusFromShipData(template);
+        randomSpawnPositionAround(anchor, shipRadius, spawnPositionScratch);
+        SpaceShip ship = createShipFromTemplate(
+            template,
+            spawnPositionScratch.x,
+            spawnPositionScratch.y,
+            name,
+            anchor
+        );
+        if (configure != null) {
+            configure.accept(ship);
+        }
+        registerShip(ship);
+        return ship;
+    }
     
     private void initialize() {
         StarSystemData systemLayout = StarSystemDataIO.loadPreferredForGameplay();
@@ -247,17 +271,12 @@ public class GameWorld {
     }
 
     private void spawnMinerNearStation(int index, GameObject station, ShipData template) {
-        float shipRadius = shipRadiusFromShipData(template);
-        randomSpawnPositionAround(station, shipRadius, spawnPositionScratch);
-        SpaceShip ship = createShipFromTemplate(
+        spawnConfiguredShipNear(
+            station,
             template,
-            spawnPositionScratch.x,
-            spawnPositionScratch.y,
             "Miner " + (index + 1) + " (" + template.id + ")",
-            station
+            ship -> ship.configureAsMiner(station)
         );
-        ship.configureAsMiner(station);
-        registerShip(ship);
     }
 
     private void refreshMineableAsteroids() {
@@ -291,16 +310,6 @@ public class GameWorld {
             }
         }
         return matches;
-    }
-
-    private int countStationsOfKind(StationKind kind) {
-        int count = 0;
-        for (GameObject obj : orbitTargets) {
-            if (obj.isStationOfKind(kind)) {
-                count++;
-            }
-        }
-        return count;
     }
 
     private GameObject pickRandomStationOfKind(StationKind kind) {
@@ -345,28 +354,23 @@ public class GameWorld {
         ShipData template,
         NpcShipRole role
     ) {
-        float shipRadius = shipRadiusFromShipData(template);
-        randomSpawnPositionAround(orbitTarget, shipRadius, spawnPositionScratch);
-
         String rolePrefix = switch (role) {
             case TRADER -> "Trader";
             case MILITIA -> "Militia";
             case CIVILIAN -> "Civilian";
         };
-        SpaceShip ship = createShipFromTemplate(
+        spawnConfiguredShipNear(
+            orbitTarget,
             template,
-            spawnPositionScratch.x,
-            spawnPositionScratch.y,
             rolePrefix + " " + (index + 1) + " (" + template.id + ")",
-            orbitTarget
+            ship -> {
+                switch (role) {
+                    case TRADER -> ship.configureAsTrader(orbitTargets);
+                    case MILITIA -> ship.configureAsMilitiaPatrol(stationsForRole(NpcShipRole.MILITIA));
+                    case CIVILIAN -> ship.configureAsCivilian(orbitTarget);
+                }
+            }
         );
-        switch (role) {
-            case TRADER -> ship.configureAsTrader(orbitTargets);
-            case MILITIA -> ship.configureAsMilitiaPatrol(stationsForRole(NpcShipRole.MILITIA));
-            case CIVILIAN -> ship.configureAsCivilian(orbitTarget);
-        }
-
-        registerShip(ship);
     }
 
     private ShipData pickPlayerShipTemplate() {
@@ -380,18 +384,12 @@ public class GameWorld {
     private void spawnPlayerShip() {
         ShipData template = pickPlayerShipTemplate();
         GameObject anchor = pickRandomOrbitTarget();
-        float shipRadius = shipRadiusFromShipData(template);
-        randomSpawnPositionAround(anchor, shipRadius, spawnPositionScratch);
-
-        playerShip = createShipFromTemplate(
+        playerShip = spawnConfiguredShipNear(
+            anchor,
             template,
-            spawnPositionScratch.x,
-            spawnPositionScratch.y,
             "Player (" + template.id + ")",
-            anchor
+            ship -> ship.configureAsPlayer(anchor)
         );
-        playerShip.configureAsPlayer(anchor);
-        registerShip(playerShip);
     }
 
     public SpaceShip getPlayerShip() {
