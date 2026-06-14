@@ -38,6 +38,9 @@ public class GameObjectInfoWindow extends Window {
 
         add(new Label("Name: " + gameObject.getName(), skin)).row();
         add(new Label("Type: " + gameObject.getType().toString(), skin)).row();
+        if (gameObject.getType() == GameObject.Type.SPACE_STATION && gameObject.getStationKind() != null) {
+            add(new Label("Station kind: " + gameObject.getStationKind(), skin)).row();
+        }
 
         if (gameObject.getType() == GameObject.Type.SPACE_SHIP) {
             shipBehaviorLabel = new Label("", skin);

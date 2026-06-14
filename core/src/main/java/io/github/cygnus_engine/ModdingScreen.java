@@ -78,6 +78,7 @@ public class ModdingScreen {
     private TextField bodyXField;
     private TextField bodyYField;
     private TextField bodySizeField;
+    private SelectBox<StationKind> bodyStationKindSelect;
 
     private Texture weaponPreviewTexture;
     private Image weaponPreviewImage;
@@ -742,6 +743,8 @@ public class ModdingScreen {
         bodyXField = new TextField("", skin);
         bodyYField = new TextField("", skin);
         bodySizeField = new TextField("", skin);
+        bodyStationKindSelect = new SelectBox<>(skin);
+        bodyStationKindSelect.setItems(StationKind.values());
 
         Table fields = new Table(skin);
         fields.defaults().pad(4f).left();
@@ -763,6 +766,8 @@ public class ModdingScreen {
         fields.add(bodyYField).width(80f).row();
         fields.add(new Label("Size", skin)).width(110f);
         fields.add(bodySizeField).width(80f).row();
+        fields.add(new Label("Station kind", skin)).width(110f);
+        fields.add(bodyStationKindSelect).width(140f).row();
         Label dragHint = new Label("(drag map or edit fields)", skin);
         dragHint.setWrap(true);
         fields.add(dragHint).colspan(2).width(250f).row();
@@ -801,6 +806,9 @@ public class ModdingScreen {
             selected.x = parseFloatSafe(bodyXField, selected.x);
             selected.y = parseFloatSafe(bodyYField, selected.y);
             selected.size = parseFloatSafe(bodySizeField, selected.size);
+            if (selected.type == StarSystemBody.Kind.SPACE_STATION && bodyStationKindSelect != null) {
+                selected.stationKind = bodyStationKindSelect.getSelected();
+            }
             selected.normalize();
         }
         data.normalize();
@@ -817,6 +825,7 @@ public class ModdingScreen {
             if (bodyXField != null) bodyXField.setText("");
             if (bodyYField != null) bodyYField.setText("");
             if (bodySizeField != null) bodySizeField.setText("");
+            if (bodyStationKindSelect != null) bodyStationKindSelect.setVisible(false);
             return;
         }
 
@@ -824,6 +833,15 @@ public class ModdingScreen {
         bodyXField.setText(Integer.toString(Math.round(selected.x)));
         bodyYField.setText(Integer.toString(Math.round(selected.y)));
         bodySizeField.setText(Integer.toString(Math.round(selected.size)));
+        if (bodyStationKindSelect != null) {
+            boolean station = selected.type == StarSystemBody.Kind.SPACE_STATION;
+            bodyStationKindSelect.setVisible(station);
+            if (station) {
+                bodyStationKindSelect.setSelected(
+                    selected.stationKind != null ? selected.stationKind : StationKind.TRADER
+                );
+            }
+        }
     }
 
     private void openCreateSystemDialog() {

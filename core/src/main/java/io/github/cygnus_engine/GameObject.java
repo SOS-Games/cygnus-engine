@@ -12,13 +12,19 @@ public class GameObject {
     private float speedX, speedY; // pixels per second
     private float size; // radius for circle, side length for square/triangle
     private String name;
+    private StationKind stationKind = StationKind.TRADER;
     
     public GameObject(Type type, float x, float y, float size, String name) {
+        this(type, x, y, size, name, StationKind.TRADER);
+    }
+
+    public GameObject(Type type, float x, float y, float size, String name, StationKind stationKind) {
         this.type = type;
         this.x = x;
         this.y = y;
         this.size = size;
         this.name = name;
+        this.stationKind = stationKind != null ? stationKind : StationKind.TRADER;
         this.rotation = 0f;
         this.rotationSpeed = 0f;
         this.speedX = 0f;
@@ -103,6 +109,24 @@ public class GameObject {
     /** Planets are rendered as scenery and excluded from orbit AI and player interaction. */
     public boolean isInteractable() {
         return type != Type.PLANET;
+    }
+
+    public StationKind getStationKind() {
+        return type == Type.SPACE_STATION ? stationKind : null;
+    }
+
+    public void setStationKind(StationKind kind) {
+        if (kind != null) {
+            stationKind = kind;
+        }
+    }
+
+    public boolean isStationOfKind(StationKind kind) {
+        return type == Type.SPACE_STATION && stationKind == kind;
+    }
+
+    public boolean isSpaceStation() {
+        return type == Type.SPACE_STATION;
     }
     
     // Setters for position (useful for wrapping)

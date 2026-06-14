@@ -103,11 +103,30 @@ public final class StarSystemDataIO {
 
         StarSystemBody station = new StarSystemBody();
         station.type = StarSystemBody.Kind.SPACE_STATION;
-        station.name = "Space Station";
+        station.stationKind = StationKind.TRADER;
+        station.name = "Trader Station";
         station.x = data.worldWidth * 1.25f;
         station.y = data.worldHeight * 0.5f;
         station.size = 50f;
         data.bodies.add(station);
+
+        StarSystemBody militiaStation = new StarSystemBody();
+        militiaStation.type = StarSystemBody.Kind.SPACE_STATION;
+        militiaStation.stationKind = StationKind.MILITIA;
+        militiaStation.name = "Militia Outpost";
+        militiaStation.x = data.worldWidth * 0.35f;
+        militiaStation.y = data.worldHeight * 0.25f;
+        militiaStation.size = 50f;
+        data.bodies.add(militiaStation);
+
+        StarSystemBody civilianStation = new StarSystemBody();
+        civilianStation.type = StarSystemBody.Kind.SPACE_STATION;
+        civilianStation.stationKind = StationKind.CIVILIAN;
+        civilianStation.name = "Civilian Port";
+        civilianStation.x = data.worldWidth * 0.65f;
+        civilianStation.y = data.worldHeight * 0.75f;
+        civilianStation.size = 50f;
+        data.bodies.add(civilianStation);
 
         data.normalize();
         return data;

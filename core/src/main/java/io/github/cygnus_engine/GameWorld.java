@@ -32,7 +32,7 @@ public class GameWorld {
     private static final float SHIP_SPAWN_MIN_CLEARANCE = 120f;
     private static final float SHIP_SPAWN_MAX_EXTRA_RADIUS = 220f;
     /** Fraction of spawned ships that run trade routes between orbit bodies. */
-    private static final float TRADER_SHIP_FRACTION = 0.66f;
+    private static final float TRADER_SHIP_FRACTION = 0.45f;
 
     private enum NpcShipRole {
         TRADER,
@@ -160,7 +160,8 @@ public class GameWorld {
                 WORLD_WIDTH * 1.25f,
                 WORLD_HEIGHT * 0.5f,
                 50f,
-                "Space Station"
+                "Space Station",
+                StationKind.TRADER
             ));
         }
 
@@ -171,11 +172,11 @@ public class GameWorld {
         }
         
         for (int i = 0; i < 10; i++) {
-            GameObject orbitTarget = pickRandomOrbitTarget();
+            NpcShipRole role = pickNpcShipRole();
+            GameObject spawnAnchor = pickSpawnAnchorForRole(role);
             ShipData template = shipTemplates.get(MathUtils.random(shipTemplates.size - 1));
             float shipRadius = shipRadiusFromShipData(template);
-            NpcShipRole role = pickNpcShipRole();
-            spawnShipNearOrbitTarget(i, orbitTarget, template, shipRadius, role);
+            spawnShipNearOrbitTarget(i, spawnAnchor, template, shipRadius, role);
         }
 
         spawnPlayerShip();
@@ -193,6 +194,55 @@ public class GameWorld {
 
     private GameObject pickRandomOrbitTarget() {
         return orbitTargets.get(MathUtils.random(orbitTargets.size - 1));
+    }
+
+    private Array<GameObject> collectStationsOfKind(StationKind kind) {
+        Array<GameObject> matches = new Array<>();
+        for (GameObject obj : orbitTargets) {
+            if (obj.isStationOfKind(kind)) {
+                matches.add(obj);
+            }
+        }
+        return matches;
+    }
+
+    private int countStationsOfKind(StationKind kind) {
+        int count = 0;
+        for (GameObject obj : orbitTargets) {
+            if (obj.isStationOfKind(kind)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private GameObject pickRandomStationOfKind(StationKind kind) {
+        Array<GameObject> matches = collectStationsOfKind(kind);
+        if (matches.isEmpty()) {
+            return pickRandomOrbitTarget();
+        }
+        return matches.get(MathUtils.random(matches.size - 1));
+    }
+
+    private Array<GameObject> stationsForRole(NpcShipRole role) {
+        StationKind kind = stationKindForRole(role);
+        Array<GameObject> matches = collectStationsOfKind(kind);
+        if (matches.isEmpty()) {
+            return new Array<>(orbitTargets);
+        }
+        return matches;
+    }
+
+    private static StationKind stationKindForRole(NpcShipRole role) {
+        return switch (role) {
+            case TRADER -> StationKind.TRADER;
+            case MILITIA -> StationKind.MILITIA;
+            case CIVILIAN -> StationKind.CIVILIAN;
+        };
+    }
+
+    private GameObject pickSpawnAnchorForRole(NpcShipRole role) {
+        return pickRandomStationOfKind(stationKindForRole(role));
     }
 
     private NpcShipRole pickNpcShipRole() {
@@ -234,7 +284,7 @@ public class GameWorld {
         ship.configureWeaponInstances(buildWeaponInstances(template));
         switch (role) {
             case TRADER -> ship.configureAsTrader(orbitTargets);
-            case MILITIA -> ship.configureAsMilitiaPatrol(orbitTargets);
+            case MILITIA -> ship.configureAsMilitiaPatrol(stationsForRole(NpcShipRole.MILITIA));
             case CIVILIAN -> ship.configureAsCivilian(orbitTarget);
         }
 
@@ -349,7 +399,8 @@ public class GameWorld {
             WORLD_WIDTH * 1.25f,
             WORLD_HEIGHT * 0.5f,
             50f,
-            "Space Station"
+            "Space Station",
+            StationKind.TRADER
         ));
     }
 
@@ -361,7 +412,9 @@ public class GameWorld {
             GameObject.Type type = body.type == StarSystemBody.Kind.SPACE_STATION
                 ? GameObject.Type.SPACE_STATION
                 : GameObject.Type.PLANET;
-            GameObject obj = new GameObject(type, body.x, body.y, body.size, body.name);
+            GameObject obj = type == GameObject.Type.SPACE_STATION
+                ? new GameObject(type, body.x, body.y, body.size, body.name, body.stationKind)
+                : new GameObject(type, body.x, body.y, body.size, body.name);
             if (type == GameObject.Type.PLANET) {
                 addBackgroundBody(obj);
             } else {
@@ -611,7 +664,7 @@ public class GameWorld {
                     shapeRenderer.circle(obj.getX(), obj.getY(), obj.getSize());
                     break;
                 case SPACE_STATION:
-                    shapeRenderer.setColor(Color.CYAN);
+                    shapeRenderer.setColor(obj.getStationKind().displayColor);
                     float halfSize = obj.getSize() / 2f;
                     shapeRenderer.rect(obj.getX() - halfSize, obj.getY() - halfSize,
                         obj.getSize(), obj.getSize());

@@ -157,7 +157,10 @@ public class StarSystemEditor {
         }
         return selectedBody.type + " \"" + selectedBody.name + "\" at ("
             + (int) selectedBody.x + ", " + (int) selectedBody.y + ") size "
-            + (int) selectedBody.size;
+            + (int) selectedBody.size
+            + (selectedBody.type == StarSystemBody.Kind.SPACE_STATION
+                ? ", kind " + selectedBody.stationKind
+                : "");
     }
 
     public void addPlanet() {
@@ -180,6 +183,7 @@ public class StarSystemEditor {
         }
         StarSystemBody body = new StarSystemBody();
         body.type = StarSystemBody.Kind.SPACE_STATION;
+        body.stationKind = StationKind.TRADER;
         body.name = "Station " + (nextIndex(StarSystemBody.Kind.SPACE_STATION));
         body.x = mapCenter.x + 80f;
         body.y = mapCenter.y;
@@ -283,7 +287,7 @@ public class StarSystemEditor {
                 shapeRenderer.setColor(selected ? Color.WHITE : (hovered ? Color.YELLOW : Color.ORANGE));
                 shapeRenderer.circle(body.x, body.y, body.size);
             } else {
-                shapeRenderer.setColor(selected ? Color.WHITE : (hovered ? Color.YELLOW : Color.CYAN));
+                shapeRenderer.setColor(selected ? Color.WHITE : (hovered ? Color.YELLOW : body.stationKind.displayColor));
                 float half = body.size;
                 shapeRenderer.rect(body.x - half, body.y - half, half * 2f, half * 2f);
             }

@@ -9,16 +9,25 @@
 	},
 	{
 		"type": "SPACE_STATION",
-		"name": "Space Station",
+		"name": "Trader Hub",
 		"x": 1220,
 		"y": 400,
 		"size": 50
 	},
 	{
 		"type": "SPACE_STATION",
-		"name": "Station 2",
-		"x": 120,
-		"y": -280,
+		"stationKind": "MILITIA",
+		"name": "Militia Outpost",
+		"x": 20,
+		"y": 780,
+		"size": 50
+	},
+	{
+		"type": "SPACE_STATION",
+		"stationKind": "CIVILIAN",
+		"name": "Civilian Port",
+		"x": 160,
+		"y": -180,
 		"size": 50
 	}
 ]

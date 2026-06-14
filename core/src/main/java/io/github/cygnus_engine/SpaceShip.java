@@ -132,6 +132,11 @@ public class SpaceShip extends GameObject {
     private static final float MILITIA_RELOCATE_MAX_SECONDS = 30f;
     private static final float MILITIA_TRANSIT_SPEED_FRACTION = 0.85f;
     private static final float MILITIA_ARRIVAL_PADDING = 25f;
+    private static final float PATROL_DOCK_PROBABILITY = 0.5f;
+    private static final float PATROL_DOCK_MIN_SECONDS = 8f;
+    private static final float PATROL_DOCK_MAX_SECONDS = 18f;
+    private static final float PATROL_DOCK_RETRY_MIN_SECONDS = 12f;
+    private static final float PATROL_DOCK_RETRY_MAX_SECONDS = 28f;
     private boolean isVisible = true;
 
     private boolean trader = false;
@@ -157,6 +162,8 @@ public class SpaceShip extends GameObject {
     private Runnable berthCompleteCallback;
     private float patrolRelocateTimer = 0f;
     private float patrolRelocateInterval = 45f;
+    private float patrolDockTimer = 0f;
+    private float patrolDockInterval = 20f;
 
     private final Array<ShipWeaponInstance> weaponInstances = new Array<>();
     /** Copy of hull {@link ShipData#colliders} for projectile hits. */
@@ -285,7 +292,7 @@ public class SpaceShip extends GameObject {
         tradeRoute.clear();
         if (stops != null) {
             for (GameObject stop : stops) {
-                if (stop != null && stop.isInteractable()) {
+                if (stop != null && stop.isSpaceStation()) {
                     tradeRoute.add(stop);
                 }
             }
@@ -307,14 +314,17 @@ public class SpaceShip extends GameObject {
         patrolAnchors.clear();
         if (anchors != null) {
             for (GameObject anchor : anchors) {
-                if (anchor != null && anchor.isInteractable()) {
+                if (anchor != null && anchor.isInteractable() && anchor.isStationOfKind(StationKind.MILITIA)) {
                     patrolAnchors.add(anchor);
                 }
             }
         }
         combatTarget = null;
         resetPatrolRelocateTimer();
-        currentBehavior = Behavior.FLYING_AROUND_TARGET;
+        resetPatrolDockTimer();
+        if (!tryBeginPatrolDock(orbitTarget)) {
+            currentBehavior = Behavior.FLYING_AROUND_TARGET;
+        }
     }
 
     /** Pirates arrive via warp-in only; they patrol locally after decelerating. */
@@ -341,7 +351,10 @@ public class SpaceShip extends GameObject {
             orbitTarget = anchor;
         }
         combatTarget = null;
-        currentBehavior = Behavior.FLYING_AROUND_TARGET;
+        resetPatrolDockTimer();
+        if (!tryBeginPatrolDock(orbitTarget)) {
+            currentBehavior = Behavior.FLYING_AROUND_TARGET;
+        }
     }
 
     public void configureAsPlayer(GameObject anchor) {
@@ -696,6 +709,7 @@ public class SpaceShip extends GameObject {
                     if (militiaPatrol) {
                         updateMilitiaPatrol(deltaTime);
                     }
+                    updatePatrolDockOpportunity(deltaTime);
                 });
                 break;
         }
@@ -1022,7 +1036,7 @@ public class SpaceShip extends GameObject {
             }
         }
 
-        if (tradeDestination.getType() == GameObject.Type.SPACE_STATION) {
+        if (tradeDestination.isSpaceStation()) {
             if (!isBerthing()) {
                 beginBerthAt(tradeDestination, DEFAULT_BERTH_SECONDS, this::pickNextTradeDestination);
             }
@@ -1230,6 +1244,57 @@ public class SpaceShip extends GameObject {
         );
     }
 
+    private void resetPatrolDockTimer() {
+        patrolDockTimer = 0f;
+        patrolDockInterval = MathUtils.random(PATROL_DOCK_RETRY_MIN_SECONDS, PATROL_DOCK_RETRY_MAX_SECONDS);
+    }
+
+    /** Half the time, militia/civilian ships berth at their anchor station instead of flying. */
+    private boolean tryBeginPatrolDock(GameObject station) {
+        if (!militiaPatrol && !civilian) {
+            return false;
+        }
+        if (station == null || !station.isSpaceStation() || isBerthing() || combatTarget != null) {
+            return false;
+        }
+        if (militiaPatrol && !station.isStationOfKind(StationKind.MILITIA)) {
+            return false;
+        }
+        if (civilian && !station.isStationOfKind(StationKind.CIVILIAN)) {
+            return false;
+        }
+        if (!MathUtils.randomBoolean(PATROL_DOCK_PROBABILITY)) {
+            return false;
+        }
+
+        float staySeconds = MathUtils.random(PATROL_DOCK_MIN_SECONDS, PATROL_DOCK_MAX_SECONDS);
+        beginBerthAt(station, staySeconds, this::onPatrolBerthComplete);
+        return isBerthing();
+    }
+
+    private void onPatrolBerthComplete() {
+        resetPatrolDockTimer();
+        if (militiaPatrol) {
+            resetPatrolRelocateTimer();
+        }
+        currentBehavior = Behavior.FLYING_AROUND_TARGET;
+    }
+
+    private void updatePatrolDockOpportunity(float deltaTime) {
+        if (!militiaPatrol && !civilian) {
+            return;
+        }
+        if (isBerthing() || combatTarget != null || currentBehavior != Behavior.FLYING_AROUND_TARGET) {
+            return;
+        }
+
+        patrolDockTimer += deltaTime;
+        if (patrolDockTimer >= patrolDockInterval) {
+            resetPatrolDockTimer();
+            tryBeginPatrolDock(orbitTarget);
+        }
+    }
+
     private void updateMilitiaPatrol(float deltaTime) {
         if (patrolAnchors.size < 2) {
             return;
@@ -1274,9 +1339,11 @@ public class SpaceShip extends GameObject {
 
         float arriveDist = orbitTarget.getSize() + getSize() + MILITIA_ARRIVAL_PADDING;
         if (getDistanceToOrbitTargetSquared() <= arriveDist * arriveDist) {
-            currentBehavior = Behavior.FLYING_AROUND_TARGET;
-            resetPatrolRelocateTimer();
-            directionChangeTimer = 0f;
+            if (!tryBeginPatrolDock(orbitTarget)) {
+                currentBehavior = Behavior.FLYING_AROUND_TARGET;
+                resetPatrolRelocateTimer();
+                directionChangeTimer = 0f;
+            }
         }
     }
 
